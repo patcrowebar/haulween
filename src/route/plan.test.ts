@@ -67,7 +67,10 @@ describe('three hours with a 10-year-old (5 to 8 pm)', () => {
       ['5:00', 9, 13], ['5:13', 10, 14], ['5:27', 10, 13], ['5:40', 10, 13], ['5:53', 32, 44],
       ['6:36', 20, 26], ['7:03', 10, 13], ['7:16', 6, 8], ['7:24', 6, 8], ['7:31', 11, 15],
     ]);
-    expect(p.schedule).toMatchObject({ headHome: '7:46', latestHeadHome: '8:00' });
+    expect(p.schedule).toMatchObject({ headHome: '7:46', latestHeadHome: '8:00', homeBy24: '19:46', windowEnd24: '20:00' });
+    // Start the walk home at 7:31; the latest that still gets everyone home by 8:00 is 7:44
+    // (the walk home takes a little over 15 min; times round down, the safe way).
+    expect(p.schedule.lastLeg).toEqual({ street: 'Elm St back home', start24: '19:31', latest24: '19:44' });
     expect(p.schedule.totals).toMatchObject({ distanceMiles: 1.14, housesEstimate: 124, totalMinutes: 167, streetCrossings: 47 });
     expect(p.estimate).toMatchObject({ minutes: 168, budget: 170, houses: 124, housesInPocket: 259 });
   });

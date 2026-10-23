@@ -21,6 +21,8 @@ npm run build
 
 Phones only allow GPS on `https`, so test Night Mode on the deployed site.
 
+**Demo mode:** add `?demo` to the address (http://localhost:5173/?demo, or https://haulween.vercel.app/?demo), or press "Try the demo". It plans around 1428 Elm St in Springwood, a made-up neighborhood, with made-up weather and no network calls at all. Screenshots in `docs/screenshots/` come from it.
+
 ## How it works
 
 - Streets come from OpenStreetMap through the Overpass API. Only your home point, rounded to about 100 m, is sent.

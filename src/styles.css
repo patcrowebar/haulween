@@ -100,3 +100,403 @@ button {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------- Plan screen ---------- */
+
+.masthead h1 {
+  margin: 0;
+  font-size: 2.4rem;
+  color: var(--orange);
+  letter-spacing: -0.02em;
+}
+
+.masthead p {
+  margin: 4px 0 20px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid #262939;
+  border-radius: 14px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.form .field {
+  margin: 0 0 16px;
+}
+
+.field > span {
+  font-weight: 700;
+}
+
+.field small,
+.small {
+  font-size: 0.85rem;
+}
+
+.form input {
+  width: 100%;
+  min-width: 0;
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--tap);
+  margin: 0 0 16px;
+}
+
+.check input {
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  accent-color: var(--orange);
+}
+
+.secondary {
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid #3a3d55;
+  background: transparent;
+  color: var(--text);
+}
+
+.link {
+  border: 0;
+  background: none;
+  color: var(--orange);
+  text-decoration: underline;
+  padding: 0 4px;
+}
+
+.error {
+  color: var(--turn-around);
+  font-weight: 700;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: #2a1d12;
+  color: #ffd2ad;
+  font-size: 0.9rem;
+}
+
+.results h2 {
+  margin: 32px 0 12px;
+  font-size: 1.6rem;
+}
+
+.results h3 {
+  margin: 24px 0 8px;
+  font-size: 1.25rem;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.stat {
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+  background: var(--panel);
+  border-radius: 14px;
+}
+
+.stat .num {
+  font-size: 1.35rem;
+}
+
+.stat.big .num {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  color: var(--orange);
+}
+
+.stat.warn .num {
+  color: var(--behind);
+}
+
+.stat .label,
+.tonight .label {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.doors {
+  border: 1px solid #262939;
+}
+
+.doors legend {
+  font-weight: 700;
+  padding: 0 4px;
+}
+
+.doors p {
+  margin: 0 0 10px;
+}
+
+.door-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.door {
+  display: grid;
+  min-height: 56px;
+  padding: 8px 12px;
+  border: 1px solid #3a3d55;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.door input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.door.on {
+  border-color: var(--orange);
+  background: #2a1d12;
+}
+
+.door:focus-within {
+  outline: 3px solid var(--orange);
+  outline-offset: 2px;
+}
+
+.door-s {
+  font-weight: 700;
+}
+
+.door-h {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.tonight h3 {
+  margin-top: 0;
+}
+
+.tonight-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.tonight-grid > div {
+  display: grid;
+}
+
+.flags {
+  margin: 12px 0 4px;
+  padding-left: 20px;
+}
+
+.map-wrap {
+  margin: 16px 0;
+}
+
+.map {
+  height: 380px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid #262939;
+}
+
+.map-key {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.key-route,
+.key-busy {
+  display: inline-block;
+  width: 24px;
+  height: 0;
+  border-top: 4px solid var(--orange);
+}
+
+.key-busy {
+  border-top: 3px dashed var(--turn-around);
+}
+
+.map-pin {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--orange);
+  color: var(--bg);
+  border: 2px solid var(--bg);
+  font: 700 14px/1 var(--font-body);
+  box-shadow: 0 1px 4px #0008;
+}
+
+.map-home {
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--bg);
+  border: 2px solid var(--orange);
+  font: 700 13px/1.2 var(--font-body);
+}
+
+.map-label {
+  color: var(--muted);
+  font: 12px/1 var(--font-body);
+  text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 11px;
+}
+
+.maplibregl-ctrl-attrib.maplibregl-attrib-empty {
+  display: block;
+}
+
+.schedule {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.schedule li {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  gap: 10px;
+  align-items: start;
+  padding: 12px 0;
+  border-bottom: 1px solid #262939;
+}
+
+.schedule .pin {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--orange);
+  color: var(--bg);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.schedule li.pass .pin {
+  background: #3a3d55;
+  color: var(--text);
+}
+
+.row-main,
+.row-side {
+  display: grid;
+}
+
+.row-name {
+  font-weight: 700;
+}
+
+.row-how,
+.row-meta {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.row-side {
+  text-align: right;
+}
+
+.row-time {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.totals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
+
+.totals p {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
+}
+
+.notes p {
+  margin: 4px 0;
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: 10px 16px;
+  border-radius: 10px;
+  text-decoration: none;
+  margin-top: 8px;
+}
+
+.footnote {
+  margin-top: 24px;
+}
+
+.map .maplibregl-ctrl-group {
+  background: var(--panel);
+  box-shadow: none;
+  border: 1px solid #3a3d55;
+}
+
+.map .maplibregl-ctrl-group button {
+  width: var(--tap);
+  height: var(--tap);
+}
+
+.map .maplibregl-ctrl-group button + button {
+  border-top: 1px solid #3a3d55;
+}
+
+.map .maplibregl-ctrl-group .maplibregl-ctrl-icon {
+  filter: invert(1);
+}
+
+.map .maplibregl-ctrl.maplibregl-ctrl-attrib {
+  background: #12131ce6;
+  color: var(--text);
+}
+
+.map .maplibregl-ctrl-attrib a {
+  color: var(--text);
+}

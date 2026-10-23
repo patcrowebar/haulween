@@ -85,6 +85,14 @@ export type Schedule = {
   latestHeadHome: string;
   homeBy: string;
   windowEnd: string;
+  /** The same times as "17:46", for showing with am/pm. */
+  homeBy24: string;
+  windowEnd24: string;
+  /**
+   * The last row, the walk back home: when the plan starts it, and the latest it can start
+   * and still be home by the end of the window.
+   */
+  lastLeg: { street: string; start24: string; latest24: string } | null;
   minutesOverWindow: number;
   minutesSpare: number;
   totals: {
@@ -152,9 +160,10 @@ export function makeSchedule(segments: Segment[], o: ScheduleOptions): Schedule 
   // Keep time in whole microseconds, as Python's timedelta does, so clock times match the reference.
   const US = 60e6;
   let t = startMin * US;
-  let walkFt = 0, doors = 0, crossings = 0;
+  let walkFt = 0, doors = 0, crossings = 0, lastMin = 0;
   const rows = segments.map((seg) => {
     const c = segmentCost(seg, p);
+    lastMin = c.minutes;
     const row: ScheduleRow = {
       time: fmtClock(t / US), t24: fmt24(t / US), street: seg.name, pattern: patternLabel(seg),
       why: seg.why, houses: c.doors, minutes: pyRound(c.minutes),
@@ -174,6 +183,11 @@ export function makeSchedule(segments: Segment[], o: ScheduleOptions): Schedule 
     latestHeadHome: fmtClock(endMin),
     homeBy: fmtClock(headHome),
     windowEnd: fmtClock(endMin),
+    homeBy24: fmt24(headHome),
+    windowEnd24: fmt24(endMin),
+    lastLeg: rows.length && segments[segments.length - 1].name.endsWith(' back home')
+      ? { street: rows[rows.length - 1].street, start24: rows[rows.length - 1].t24, latest24: fmt24(endMin - lastMin) }
+      : null,
     minutesOverWindow: over > 0 ? pyRound(over) : 0,
     minutesSpare: over < 0 ? pyRound(-over) : 0,
     totals: {
