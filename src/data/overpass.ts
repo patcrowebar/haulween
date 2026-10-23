@@ -1,5 +1,6 @@
 // Street data from the OpenStreetMap Overpass API. One POST per plan, cached per rounded home
 // point for the session. Overpass only ever sees the home point rounded to 3 decimals (~100 m).
+// If the main server fails or says it's busy, the same request goes once to a backup server.
 
 import { HOME_POINT_DECIMALS } from '../config';
 import { fromOverpass } from '../route/osm';
@@ -7,6 +8,8 @@ import type { OsmData } from '../route/types';
 import { SessionCache, ServiceError } from './cache';
 
 export const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+/** Used only when the main server fails or is busy. */
+export const OVERPASS_BACKUP_URL = 'https://overpass.private.coffee/api/interpreter';
 /** Enough streets for a 2 to 3 hour window. */
 export const RADIUS_M = 900;
 
@@ -52,9 +55,17 @@ export class OverpassClient {
   }
 
   private async fetchStreets(lat: number, lng: number): Promise<OsmData> {
+    try {
+      return await this.ask(OVERPASS_URL, lat, lng);
+    } catch {
+      return this.ask(OVERPASS_BACKUP_URL, lat, lng);
+    }
+  }
+
+  private async ask(url: string, lat: number, lng: number): Promise<OsmData> {
     let res: Response;
     try {
-      res = await this.fetchFn(OVERPASS_URL, {
+      res = await this.fetchFn(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'data=' + encodeURIComponent(overpassQuery(lat, lng)),
@@ -66,6 +77,10 @@ export class OverpassClient {
       throw new ServiceError('The street map is busy right now. Try again in a minute.', res.status);
     }
     if (!res.ok) throw new ServiceError("The street map didn't answer. Try again in a minute.", res.status);
-    return fromOverpass(await res.json());
+    try {
+      return fromOverpass(await res.json());
+    } catch {
+      throw new ServiceError("The street map sent something we couldn't read. Try again in a minute.");
+    }
   }
 }

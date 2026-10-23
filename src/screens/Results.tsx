@@ -19,6 +19,8 @@ type Props = {
   tonight: Tonight | null;
   weatherNote: string | null;
   onDoor: (seconds: number) => void;
+  /** A door time that's being planned right now. */
+  pendingDoor: number | null;
 };
 
 const PATTERN_TEXT: Record<string, string> = {
@@ -27,7 +29,7 @@ const PATTERN_TEXT: Record<string, string> = {
 };
 const patternText = (p: string) => PATTERN_TEXT[p] ?? p.charAt(0).toUpperCase() + p.slice(1);
 
-export default function Results({ outcome, plan, form, label, demo, tonight, weatherNote, onDoor }: Props) {
+export default function Results({ outcome, plan, form, label, demo, tonight, weatherNote, onDoor, pendingDoor }: Props) {
   const { schedule, estimate, segments } = plan;
   const leg = schedule.lastLeg;
   const links = mapsLinks(routeLine(segments)[0], segments);
@@ -64,7 +66,7 @@ export default function Results({ outcome, plan, form, label, demo, tonight, wea
       {outcome.estimates && (
         <fieldset className="panel doors">
           <legend>How long at each door?</legend>
-          <p className="muted small">Older kids are quicker. Pick what fits your crew.</p>
+          <p className="muted small">Older kids are quicker. Tap one to see how many houses it fits.</p>
           <div className="door-grid">
             {outcome.estimates.map((e) => (
               <label key={e.seconds} className={`door ${form.doorSeconds === e.seconds ? 'on' : ''}`}>
@@ -74,7 +76,9 @@ export default function Results({ outcome, plan, form, label, demo, tonight, wea
                 />
                 <span className="door-s">{e.seconds} sec</span>
                 <span className="door-h">
-                  {e.houses === undefined ? 'estimating…' : e.houses === null ? 'no route fits' : `~${e.houses} houses`}
+                  {pendingDoor === e.seconds
+                    ? 'planning…'
+                    : e.houses === undefined ? 'tap to see' : e.houses === null ? 'no route fits' : `~${e.houses} houses`}
                 </span>
               </label>
             ))}

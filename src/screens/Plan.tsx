@@ -60,40 +60,32 @@ export default function Plan() {
   /** Plans already worked out for this address and these answers, by door time. */
   const byDoor = useRef(new Map<number, PlanOnce>());
   const generation = useRef(0);
+  const lastTap = useRef(0);
+  /** The door time being planned after a tap, for its "planning…" label. */
+  const [pendingDoor, setPendingDoor] = useState<number | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const set = <K extends keyof PlanForm>(k: K, v: PlanForm[K]) => setForm((f) => ({ ...f, [k]: v }));
   const youngest = youngestAge(form.ages);
 
-  /** Plan at the chosen door time, show it, then estimate the other door times in the background. */
+  /** Plan at the chosen door time and show it. Other door times are planned only when tapped. */
   async function show(next: Found, f: PlanForm) {
     planner.cancel();
     const gen = ++generation.current;
     byDoor.current = new Map();
+    setPendingDoor(null);
     const door = doorSecondsFor(f);
     const main = await planner.run(next.data, next.home, f, door);
     if (gen !== generation.current) return;
     byDoor.current.set(door, main);
-    const asks = asksDoorTime(main.youngest);
     setFound(next);
     setOutcome({
       ...main,
-      estimates: asks ? DOOR_SECONDS_CHOICES.map((s) => ({ seconds: s, houses: s === door ? housesOf(main) : undefined })) : null,
+      estimates: asksDoorTime(main.youngest)
+        ? DOOR_SECONDS_CHOICES.map((s) => ({ seconds: s, houses: s === door ? housesOf(main) : undefined }))
+        : null,
     });
     if (!main.result.ok) setError(NO_ROUTE);
-    if (!asks) return;
-    void (async () => {
-      for (const s of DOOR_SECONDS_CHOICES) {
-        if (s === door) continue;
-        const r = await planner.run(next.data, next.home, f, s).catch(() => null);
-        if (!r || gen !== generation.current) return;
-        byDoor.current.set(s, r);
-        setOutcome((o) => o && {
-          ...o,
-          estimates: o.estimates?.map((e) => (e.seconds === s ? { ...e, houses: housesOf(r) } : e)) ?? null,
-        });
-      }
-    })();
   }
 
   async function plan(f: PlanForm, asDemo: boolean) {
@@ -177,11 +169,22 @@ export default function Plan() {
     if (!demo) saveForm(f);
     if (!found) return;
     const gen = generation.current;
-    const p = byDoor.current.get(seconds) ?? (await planner.run(found.data, found.home, f, seconds).catch(() => null));
-    if (!p || gen !== generation.current) return;
-    byDoor.current.set(seconds, p);
-    setError(p.result.ok ? null : NO_ROUTE);
-    setOutcome((o) => o && { ...p, estimates: o.estimates });
+    const tap = ++lastTap.current;
+    let p = byDoor.current.get(seconds);
+    if (!p) {
+      setPendingDoor(seconds);
+      p = (await planner.run(found.data, found.home, f, seconds).catch(() => null)) ?? undefined;
+      if (tap === lastTap.current) setPendingDoor(null);
+      if (!p || gen !== generation.current) return;
+      byDoor.current.set(seconds, p);
+    }
+    const done = p;
+    setOutcome((o) => {
+      if (!o) return o;
+      const estimates = o.estimates?.map((e) => (e.seconds === seconds ? { ...e, houses: housesOf(done) } : e)) ?? null;
+      return tap === lastTap.current ? { ...done, estimates } : { ...o, estimates };
+    });
+    if (tap === lastTap.current) setError(done.result.ok ? null : NO_ROUTE);
   }
 
   useEffect(() => {
@@ -278,7 +281,7 @@ export default function Plan() {
         {found && outcome?.result.ok && (
           <Results
             outcome={outcome} plan={outcome.result.plan} form={form} label={found.label}
-            demo={found.demo} tonight={tonight} weatherNote={weatherNote} onDoor={chooseDoor}
+            demo={found.demo} tonight={tonight} weatherNote={weatherNote} onDoor={chooseDoor} pendingDoor={pendingDoor}
           />
         )}
       </div>

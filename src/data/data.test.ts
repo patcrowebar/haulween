@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SessionCache } from './cache';
 import { FallbackGeocoder, NominatimGeocoder, PhotonGeocoder, Throttle } from './geocoder';
-import { OverpassClient, roundPoint } from './overpass';
+import { OVERPASS_BACKUP_URL, OVERPASS_URL, OverpassClient, roundPoint } from './overpass';
 import { WeatherClient, addMinutes, flagsFor } from './weather';
 import { PLACEHOLDER_ADDRESS } from '../config';
 
@@ -33,6 +33,36 @@ describe('Overpass client', () => {
   it('explains a busy server in plain words', async () => {
     const c = new OverpassClient(() => json({}, 429), new SessionCache('t.', null));
     await expect(c.streetsNear(41.8, -82.1)).rejects.toThrow('The street map is busy right now. Try again in a minute.');
+  });
+
+  const urls = (f: ReturnType<typeof vi.fn>) => f.mock.calls.map((c) => (c as unknown as [string])[0]);
+
+  it('never touches the backup when the main server answers', async () => {
+    const fetchFn = vi.fn(() => json({ elements: [] }));
+    await new OverpassClient(fetchFn, new SessionCache('t.', null)).streetsNear(41.8, -82.1);
+    expect(urls(fetchFn)).toEqual([OVERPASS_URL]);
+  });
+
+  it.each([429, 504, 500])('asks the backup once when the main server answers %i', async (status) => {
+    const fetchFn = vi.fn((url: string) => (url === OVERPASS_URL ? json({}, status) : json({ elements: [] })));
+    const data = await new OverpassClient(fetchFn as unknown as typeof fetch, new SessionCache('t.', null)).streetsNear(41.8, -82.1);
+    expect(data.streets).toEqual([]);
+    expect(urls(fetchFn)).toEqual([OVERPASS_URL, OVERPASS_BACKUP_URL]);
+    const [, init] = fetchFn.mock.calls[1] as unknown as [string, RequestInit];
+    expect(decodeURIComponent(String(init.body))).toContain('around:900,41.8,-82.1)'); // still rounded
+  });
+
+  it('asks the backup when the main server is unreachable', async () => {
+    const fetchFn = vi.fn((url: string) => (url === OVERPASS_URL ? Promise.reject(new TypeError('offline')) : json({ elements: [] })));
+    await new OverpassClient(fetchFn as unknown as typeof fetch, new SessionCache('t.', null)).streetsNear(41.8, -82.1);
+    expect(urls(fetchFn)).toEqual([OVERPASS_URL, OVERPASS_BACKUP_URL]);
+  });
+
+  it('gives up after the backup, with the backup’s reason', async () => {
+    const fetchFn = vi.fn((url: string) => json({}, url === OVERPASS_URL ? 500 : 429));
+    const c = new OverpassClient(fetchFn as unknown as typeof fetch, new SessionCache('t.', null));
+    await expect(c.streetsNear(41.8, -82.1)).rejects.toThrow('The street map is busy right now.');
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 });
 

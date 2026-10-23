@@ -8,7 +8,7 @@
   --behind: #f2c14e;
   --turn-around: #ff7a6b;
 
-  /* Fonts are not loaded yet; these stacks fall back until they are. */
+  /* Self-hosted from @fontsource (see main.tsx). */
   --font-display: 'Bricolage Grotesque', system-ui, sans-serif;
   --font-body: 'Atkinson Hyperlegible', system-ui, sans-serif;
 
