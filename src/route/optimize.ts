@@ -118,6 +118,13 @@ export class Planner {
   private adj = new Map<string, Edge[]>();
   private spCache = new Map<string, { dist: Map<string, number>; prev: Map<string, Edge> }>();
   private hpc: number;
+  // evaluate() runs tens of thousands of times per plan, so it works on numbered nodes and flat
+  // arrays. Every loop keeps the reference's order, so ties break exactly as before.
+  private keys: string[] = [];
+  private index = new Map<string, number>();
+  private ui: Int32Array;
+  private vi: Int32Array;
+  private distCache = new Map<number, Float64Array>();
 
   constructor(graph: Graph, private o: PlannerOptions) {
     this.edges = reachableEdges(graph);
@@ -131,6 +138,24 @@ export class Planner {
         this.adj.set(n, list);
       }
     }
+    for (const n of [this.home, ...this.edges.flatMap((e) => [e.u, e.v])]) {
+      if (!this.index.has(n)) { this.index.set(n, this.keys.length); this.keys.push(n); }
+    }
+    const maxId = this.edges.reduce((m, e) => Math.max(m, e.id), 0) + 1;
+    this.ui = new Int32Array(maxId);
+    this.vi = new Int32Array(maxId);
+    for (const e of this.edges) { this.ui[e.id] = this.index.get(e.u)!; this.vi[e.id] = this.index.get(e.v)!; }
+  }
+
+  /** Walking minutes from node number s to every node number (Infinity if unreachable). */
+  private distFrom(s: number): Float64Array {
+    let d = this.distCache.get(s);
+    if (!d) {
+      d = new Float64Array(this.keys.length).fill(Infinity);
+      for (const [k, v] of this.sp(this.keys[s]).dist) d[this.index.get(k)!] = v;
+      this.distCache.set(s, d);
+    }
+    return d;
   }
 
   walk(e: Edge) { return e.lengthFt / this.o.ftPerMin; }
@@ -178,69 +203,78 @@ export class Planner {
     return out.reverse();
   }
 
-  components(W: Edge[]): Set<string>[] {
-    const parent = new Map<string, string>([[this.home, this.home]]);
-    for (const e of W) { parent.set(e.u, e.u); parent.set(e.v, e.v); }
-    const find = (x: string): string => {
-      while (parent.get(x) !== x) {
-        parent.set(x, parent.get(parent.get(x)!)!);
-        x = parent.get(x)!;
+  /** Groups of nodes joined by W, home's group first, in the reference's order. */
+  private components(W: Edge[]): number[][] {
+    const { ui, vi } = this;
+    const N = this.keys.length;
+    const parent = new Int32Array(N).fill(-1);
+    const order: number[] = [];
+    const add = (n: number) => { if (parent[n] < 0) { parent[n] = n; order.push(n); } else parent[n] = n; };
+    add(this.index.get(this.home)!);
+    for (const e of W) { add(ui[e.id]); add(vi[e.id]); }
+    const find = (x: number) => {
+      while (parent[x] !== x) {
+        parent[x] = parent[parent[x]];
+        x = parent[x];
       }
       return x;
     };
-    for (const e of W) parent.set(find(e.u), find(e.v));
-    const groups = new Map<string, Set<string>>();
-    for (const n of parent.keys()) {
+    for (const e of W) parent[find(ui[e.id])] = find(vi[e.id]);
+    const groupOf = new Map<number, number[]>();
+    const groups: number[][] = [];
+    for (const n of order) {
       const r = find(n);
-      if (!groups.has(r)) groups.set(r, new Set());
-      groups.get(r)!.add(n);
+      let g = groupOf.get(r);
+      if (!g) { g = []; groupOf.set(r, g); groups.push(g); }
+      g.push(n);
     }
-    return [...groups.values()];
+    return groups;
   }
 
   /** Minutes for working set W as a closed walk from home, and the extra pieces walked to close it. */
   evaluate(W: Edge[]): [number, Edge[]] {
+    const { ui, vi, keys } = this;
     let cost = W.reduce((s, e) => s + this.zig(e), 0);
     const dead: Edge[] = [];
     // 1. Join groups to home's (Prim over shortest walks); each link is walked both ways.
-    const comps = this.components(W);
-    const homec = comps.find((c) => c.has(this.home))!;
-    const joined = new Set(homec);
-    const rest = comps.filter((c) => c !== homec);
+    const [homec, ...rest] = this.components(W);
+    const joined = [...homec];
     while (rest.length) {
-      let best: [number, number, string, string] | null = null;
+      let best: [number, number, number, number] | null = null;
       for (let ci = 0; ci < rest.length; ci++) {
         for (const a of joined) {
-          const { dist } = this.sp(a);
+          const dist = this.distFrom(a);
           for (const b of rest[ci]) {
-            const d = dist.get(b);
-            if (d !== undefined && (best === null || d < best[0])) best = [d, ci, a, b];
+            const d = dist[b];
+            if (d !== Infinity && (best === null || d < best[0])) best = [d, ci, a, b];
           }
         }
       }
       if (best === null) return [INF, []];
-      const [d, ci, a, b]: [number, number, string, string] = best;
-      const p = this.path(a, b);
+      const [d, ci, a, b]: [number, number, number, number] = best;
+      const p = this.path(keys[a], keys[b]);
       dead.push(...p, ...p);
       cost += 2 * d;
-      for (const n of rest.splice(ci, 1)[0]) joined.add(n);
+      joined.push(...rest.splice(ci, 1)[0]);
     }
-    // 2. Pair odd-degree nodes.
-    const deg = new Map<string, number>();
-    for (const e of [...W, ...dead]) {
-      deg.set(e.u, (deg.get(e.u) ?? 0) + 1);
-      deg.set(e.v, (deg.get(e.v) ?? 0) + 1);
-    }
-    const odd = [...deg].filter(([, d]) => d % 2).map(([n]) => n);
-    for (const [a, b] of this.match(odd)) {
-      dead.push(...this.path(a, b));
-      cost += this.sp(a).dist.get(b)!;
+    // 2. Pair odd-degree nodes, in order of first appearance.
+    const deg = new Int32Array(keys.length);
+    const seen: number[] = [];
+    const bump = (n: number) => { if (deg[n]++ === 0) seen.push(n); };
+    for (const e of W) { bump(ui[e.id]); bump(vi[e.id]); }
+    for (const e of dead) { bump(ui[e.id]); bump(vi[e.id]); }
+    const odd = seen.filter((n) => deg[n] % 2);
+    for (const [a, b] of this.matchNodes(odd)) {
+      dead.push(...this.path(keys[a], keys[b]));
+      cost += this.distFrom(a)[b];
     }
     // 3. A worked street walked again is done one side each way: no zigzag crossings.
-    const Wids = new Set(W.map((e) => e.id));
-    const reused = new Set(dead.filter((e) => Wids.has(e.id)).map((e) => e.id));
+    const inW = new Uint8Array(ui.length);
+    for (const e of W) inW[e.id] = 1;
+    const reused = new Uint8Array(ui.length);
+    for (const e of dead) if (inW[e.id]) reused[e.id] = 1;
     for (const e of W) {
-      if (reused.has(e.id)) {
+      if (reused[e.id]) {
         const h = this.houses(e);
         if (h) cost -= (Math.ceil(h / this.hpc) - 1) * this.o.crossMin;
       }
@@ -248,63 +282,79 @@ export class Planner {
     return [cost, dead];
   }
 
-  match(odd: string[]): Array<[string, string]> {
+  private matchNodes(odd: number[]): Array<[number, number]> {
     if (!odd.length) return [];
-    const D = new Map(odd.map((a) => [a, this.sp(a).dist]));
-    const dd = (a: string, b: string) => D.get(a)!.get(b) ?? 1e9;
     const n = odd.length;
+    const dd = (a: number, b: number) => {
+      const d = this.distFrom(a)[b];
+      return d === Infinity ? 1e9 : d;
+    };
     if (n <= 14) {
-      const memo = new Map<number, [number, Array<[string, string]>]>();
+      // Exact minimum pairing over bitmasks. Same choices and pair order as the reference,
+      // with flat arrays instead of a Map of copied lists (this runs tens of thousands of times).
+      const dist = new Float64Array(n * n);
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) dist[i * n + j] = dd(odd[i], odd[j]);
       const full = (1 << n) - 1;
-      const solve = (mask: number): [number, Array<[string, string]>] => {
-        if (mask === full) return [0, []];
-        const hit = memo.get(mask);
-        if (hit) return hit;
+      const cost = new Float64Array(1 << n).fill(-1);
+      const pick = new Int8Array(1 << n).fill(-1);
+      const solve = (mask: number): number => {
+        if (mask === full) return 0;
+        if (cost[mask] >= 0) return cost[mask];
         let i = 0;
         while ((mask >> i) & 1) i++;
-        let best: [number, Array<[string, string]>] = [INF, []];
+        let best = INF, bestJ = -1;
         for (let j = i + 1; j < n; j++) {
           if ((mask >> j) & 1) continue;
-          const [c0, ps] = solve(mask | (1 << i) | (1 << j));
-          const c = c0 + dd(odd[i], odd[j]);
-          if (c < best[0]) best = [c, [...ps, [odd[i], odd[j]]]];
+          const c = solve(mask | (1 << i) | (1 << j)) + dist[i * n + j];
+          if (c < best) { best = c; bestJ = j; }
         }
-        memo.set(mask, best);
+        cost[mask] = best;
+        pick[mask] = bestJ;
         return best;
       };
-      return solve(0)[1];
+      solve(0);
+      const pairs: Array<[number, number]> = [];
+      for (let mask = 0; mask !== full && pick[mask] >= 0; ) {
+        let i = 0;
+        while ((mask >> i) & 1) i++;
+        const j = pick[mask];
+        pairs.push([odd[i], odd[j]]);
+        mask |= (1 << i) | (1 << j);
+      }
+      return pairs.reverse(); // the reference lists the deepest pair first
     }
-    // Greedy for large sets, then pairwise improvement.
-    const left = new Set(odd);
-    const pairs: Array<[string, string]> = [];
-    while (left.size) {
-      const a = left.values().next().value as string;
-      left.delete(a);
-      let b = '';
-      for (const x of left) if (b === '' || dd(a, x) < dd(a, b)) b = x;
-      left.delete(b);
-      pairs.push([a, b]);
+    // Greedy for large sets, then pairwise improvement. Same order and tie-breaks as the
+    // reference, on node numbers and a distance table (dd isn't symmetric: keep its argument order).
+    const dist = new Float64Array(n * n);
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) dist[i * n + j] = dd(odd[i], odd[j]);
+    const alive = new Uint8Array(n).fill(1);
+    const P: Array<[number, number]> = [];
+    for (let first = 0; first < n; first++) {
+      if (!alive[first]) continue;
+      const a = first;
+      alive[a] = 0;
+      let b = -1;
+      for (let x = 0; x < n; x++) if (alive[x] && (b < 0 || dist[a * n + x] < dist[a * n + b])) b = x;
+      alive[b] = 0;
+      P.push([a, b]);
     }
     let improved = true;
     while (improved) {
       improved = false;
-      for (let i = 0; i < pairs.length; i++) {
-        for (let j = i + 1; j < pairs.length; j++) {
-          const [a, b] = pairs[i], [c, d] = pairs[j];
-          let now = dd(a, b) + dd(c, d);
-          for (const [x, y] of [[[a, c], [b, d]], [[a, d], [b, c]]] as Array<[[string, string], [string, string]]>) {
-            const alt = dd(x[0], x[1]) + dd(y[0], y[1]);
-            if (alt + 1e-9 < now) {
-              pairs[i] = x;
-              pairs[j] = y;
-              now = alt;
-              improved = true;
-            }
-          }
+      for (let i = 0; i < P.length; i++) {
+        for (let j = i + 1; j < P.length; j++) {
+          const [a, b] = P[i], [c, d] = P[j];
+          let now = dist[a * n + b] + dist[c * n + d];
+          // first alternative: (a, c) and (b, d)
+          let alt = dist[a * n + c] + dist[b * n + d];
+          if (alt + 1e-9 < now) { P[i] = [a, c]; P[j] = [b, d]; now = alt; improved = true; }
+          // second alternative: (a, d) and (b, c)
+          alt = dist[a * n + d] + dist[b * n + c];
+          if (alt + 1e-9 < now) { P[i] = [a, d]; P[j] = [b, c]; now = alt; improved = true; }
         }
       }
     }
-    return pairs;
+    return P.map(([x, y]): [number, number] => [odd[x], odd[y]]);
   }
 
   optimize(): { worked: Edge[]; minutes: number } {
@@ -318,6 +368,7 @@ export class Planner {
         if (saved <= 0) continue;
         const score = this.houses(e) / saved;
         if (best === null || score < best[0]) best = [score, eid, c];
+        if (score === 0) break; // nothing scores lower, and the first of equals wins anyway
       }
       if (best === null) break;
       W.delete(best[1]);
