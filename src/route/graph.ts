@@ -2,6 +2,10 @@
 // Ported from reference/optimize_route.py (build_graph).
 //
 // Pieces meet only where they share a vertex, so the walk can never jump a gap in the street data.
+// A vertex on a busy road joins nothing: each piece that reaches it gets its own dead end there,
+// so a walk can come up to a busy road and turn back but never cross it. (The reference joined
+// pieces there too, which let a walk cross straight over.) Crossing a busy road, if it's ever
+// offered, has to be an option the parent turns on.
 
 import { Geo, frontage, key, pyRound, type XY } from './geo';
 import { blockerPolygons, prepareStreets, type Pocket } from './pocket';
@@ -12,7 +16,7 @@ export type Edge = {
   id: number;
   name: string;
   points: Pt[];
-  /** Node keys at each end. */
+  /** Node at each end: the vertex key, plus "|id" when that vertex is on a busy road. */
   u: string;
   v: string;
   lengthFt: number;
@@ -86,20 +90,24 @@ export function buildGraph(data: OsmData, pocket: Pocket, home: Pt, frontageFt =
     if (len <= 1) continue;
     if (!othersByName.has(name)) othersByName.set(name, all.filter((o) => o.name !== name).map((o) => o.xy));
     const [L, R] = frontage(xy, othersByName.get(name)!, blockers, busyXY);
-    const u = key(g[0]), v = key(g[g.length - 1]);
+    const id = edges.length;
     const busyAt = new Map<string, string>();
-    for (const n of [u, v]) if (busyName.has(n)) busyAt.set(n, busyName.get(n)!);
+    const node = (k: string) => {
+      if (!busyName.has(k)) return k;
+      busyAt.set(`${k}|${id}`, busyName.get(k)!);
+      return `${k}|${id}`;
+    };
+    const u = node(key(g[0])), v = node(key(g[g.length - 1]));
     edges.push({
-      id: edges.length, name, points: g, u, v, lengthFt: len,
+      id, name, points: g, u, v, lengthFt: len,
       left: pyRound(L / frontageFt), right: pyRound(R / frontageFt), busyAt,
     });
   }
 
   const nodes = new Map<string, Pt>();
   for (const e of edges) {
-    for (const p of [e.points[0], e.points[e.points.length - 1]]) {
-      nodes.set(key(p), [Number(p[0].toFixed(5)), Number(p[1].toFixed(5))]);
-    }
+    const ends: Array<[string, Pt]> = [[e.u, e.points[0]], [e.v, e.points[e.points.length - 1]]];
+    for (const [n, p] of ends) nodes.set(n, [Number(p[0].toFixed(5)), Number(p[1].toFixed(5))]);
   }
   return { edges, home: homeKey, nodes };
 }

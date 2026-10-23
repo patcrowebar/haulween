@@ -2,8 +2,9 @@
 // Expected values come from reference/run_fixture.py.
 
 import { describe, expect, it } from 'vitest';
-import { HOME, SPRINGWOOD, ft } from './__fixtures__/springwood';
+import { HOME, SPRINGWOOD, SPRINGWOOD_MILL_RD, ft } from './__fixtures__/springwood';
 import { checkRoute } from './check';
+import { key } from './geo';
 import { buildGraph } from './graph';
 import { Planner, toSegments } from './optimize';
 import { findPocket } from './pocket';
@@ -177,5 +178,39 @@ describe('a street the walk cannot reach', () => {
     expect(minutes).toBeLessThanOrEqual(50);
     expect(worked.reduce((s, e) => s + planner.houses(e), 0)).toBe(29);
     expect(checkRoute(pocket, toSegments(planner.tour(worked)), HOME)).toEqual([]);
+  });
+});
+
+describe('Mill Rd: two safe streets that meet across a busy road', () => {
+  const mill = findPocket(SPRINGWOOD_MILL_RD, HOME);
+  const MILL_RD = ft(700, 300);
+  const windows: PlanOptions[] = [
+    { startTime: '5:00pm', endTime: '10:00pm', youngestAge: 13 },
+    { startTime: '5:00pm', endTime: '8:00pm', youngestAge: 10 },
+    { startTime: '5:00pm', endTime: '6:30pm', youngestAge: 6 },
+  ];
+
+  it('keeps both streets in the safe area', () => {
+    expect(mill.busyNames).toContain('Mill Rd');
+    expect(mill.pocket.map((s) => s.name)).toEqual(expect.arrayContaining(['Birch St', 'Oak St']));
+  });
+
+  it.each(windows)('only ever turns back at Mill Rd, never walks through it (%o)', (o) => {
+    const r = planRoute(SPRINGWOOD_MILL_RD, HOME, o);
+    if (!r.ok) throw new Error(r.problems.join('\n'));
+    const walk = r.plan.segments.flatMap((s, i) => (i ? s.points.slice(1) : s.points));
+    for (let i = 1; i < walk.length - 1; i++) {
+      if (key(walk[i]) === key(MILL_RD)) expect(key(walk[i + 1])).toBe(key(walk[i - 1]));
+    }
+  });
+
+  it('goes around to Oak St by Maple Ave and skips the stretch of Birch St that only leads to Mill Rd', () => {
+    const r = planRoute(SPRINGWOOD_MILL_RD, HOME, windows[1]);
+    if (!r.ok) throw new Error(r.problems.join('\n'));
+    const names = r.plan.segments.map((s) => s.name);
+    expect(names).toContain('Maple Ave to Oak St');
+    expect(names.some((n) => n.startsWith('Oak St'))).toBe(true);
+    expect(names.some((n) => n.startsWith('Birch St'))).toBe(false);
+    expect(Object.keys(r.plan.skipped)).toContain('Birch St');
   });
 });

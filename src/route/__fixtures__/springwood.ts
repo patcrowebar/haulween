@@ -3,9 +3,13 @@
 import { FT_PER_DEG } from '../geo';
 import { fromOverpass } from '../osm';
 import type { Pt } from '../types';
+import rawMillRd from './springwood-mill-rd.overpass.json';
 import raw from './springwood.overpass.json';
 
 export const SPRINGWOOD = fromOverpass(raw);
+
+/** Springwood plus Mill Rd, a busy road where Birch St and Oak St meet. */
+export const SPRINGWOOD_MILL_RD = fromOverpass(rawMillRd);
 
 const ORIGIN: Pt = [41.8, -82.1];
 const KX = FT_PER_DEG * Math.cos((ORIGIN[0] * Math.PI) / 180);

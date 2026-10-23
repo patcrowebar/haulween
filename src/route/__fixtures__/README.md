@@ -8,6 +8,8 @@ street-data sample taken around a real home address.
   block. Built by `make-springwood.mjs`, which lists what each street is there
   to test (busy roads of each kind, a park, a school, a dead end, a no-house
   connector, and a street that comes back in two pieces with a yard between).
+- `springwood-mill-rd.overpass.json`: the same streets plus Mill Rd, a busy
+  road where two safe streets meet, for the never-cross-a-busy-road tests.
 - `springwood.ts`: the parsed data and the placeholder home, 1428 Elm St.
 
 The expected numbers in the tests come from running the Python in `reference/`

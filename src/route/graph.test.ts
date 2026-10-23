@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HOME, SPRINGWOOD } from './__fixtures__/springwood';
+import { HOME, SPRINGWOOD, SPRINGWOOD_MILL_RD, ft } from './__fixtures__/springwood';
 import { key } from './geo';
 import { buildGraph } from './graph';
 import { findPocket } from './pocket';
@@ -30,13 +30,25 @@ describe('buildGraph on Springwood', () => {
 
   it('joins pieces only at shared street points', () => {
     for (const e of g.edges) {
-      expect(key(e.points[0])).toBe(e.u);
-      expect(key(e.points[e.points.length - 1])).toBe(e.v);
+      expect(e.u.split('|')[0]).toBe(key(e.points[0]));
+      expect(e.v.split('|')[0]).toBe(key(e.points[e.points.length - 1]));
     }
   });
 
   it('marks ends that touch a busy road', () => {
     const walnutTop = g.edges.filter((e) => e.name === 'Walnut St').flatMap((e) => [...e.busyAt.values()]);
     expect(walnutTop).toEqual(['Ridge Rd']);
+  });
+});
+
+describe('buildGraph at a busy road', () => {
+  it('gives Birch St and Oak St separate dead ends at Mill Rd, so no walk passes through', () => {
+    const g = buildGraph(SPRINGWOOD_MILL_RD, findPocket(SPRINGWOOD_MILL_RD, HOME), HOME);
+    const mill = key(ft(700, 300));
+    const ends = g.edges.flatMap((e) => [e.u, e.v]).filter((n) => n.startsWith(mill));
+    expect(ends).toHaveLength(2);
+    expect(new Set(ends).size).toBe(2);
+    const names = g.edges.filter((e) => ends.includes(e.u) || ends.includes(e.v)).map((e) => e.name).sort();
+    expect(names).toEqual(['Birch St', 'Oak St']);
   });
 });

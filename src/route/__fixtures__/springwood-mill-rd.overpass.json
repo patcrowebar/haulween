@@ -1,0 +1,540 @@
+{
+ "version": 0.6,
+ "generator": "Overpass API (hand-made Haulween test fixture; not real data)",
+ "osm3s": {
+  "timestamp_osm_base": "2026-10-01T00:00:00Z",
+  "copyright": "Made-up test data in the OpenStreetMap response format. Describes no real place."
+ },
+ "elements": [
+  {
+   "type": "way",
+   "id": 9000001,
+   "geometry": [
+    {
+     "lat": 41.79753,
+     "lon": -82.10516
+    },
+    {
+     "lat": 41.79835,
+     "lon": -82.10516
+    },
+    {
+     "lat": 41.8,
+     "lon": -82.10516
+    },
+    {
+     "lat": 41.80082,
+     "lon": -82.10516
+    },
+    {
+     "lat": 41.80165,
+     "lon": -82.10516
+    },
+    {
+     "lat": 41.8033,
+     "lon": -82.10516
+    },
+    {
+     "lat": 41.80412,
+     "lon": -82.10516
+    }
+   ],
+   "tags": {
+    "highway": "primary",
+    "name": "Main St"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000002,
+   "geometry": [
+    {
+     "lat": 41.8033,
+     "lon": -82.10516
+    },
+    {
+     "lat": 41.8033,
+     "lon": -82.10258
+    },
+    {
+     "lat": 41.8033,
+     "lon": -82.1
+    },
+    {
+     "lat": 41.8033,
+     "lon": -82.09742
+    },
+    {
+     "lat": 41.8033,
+     "lon": -82.09484
+    }
+   ],
+   "tags": {
+    "highway": "tertiary",
+    "name": "Ridge Rd",
+    "maxspeed": "35 mph"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000003,
+   "geometry": [
+    {
+     "lat": 41.79753,
+     "lon": -82.09484
+    },
+    {
+     "lat": 41.8,
+     "lon": -82.09484
+    },
+    {
+     "lat": 41.80082,
+     "lon": -82.09484
+    },
+    {
+     "lat": 41.80165,
+     "lon": -82.09484
+    },
+    {
+     "lat": 41.8033,
+     "lon": -82.09484
+    },
+    {
+     "lat": 41.80412,
+     "lon": -82.09484
+    }
+   ],
+   "tags": {
+    "highway": "tertiary",
+    "name": "Park Rd",
+    "lanes": "3"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000004,
+   "geometry": [
+    {
+     "lat": 41.8,
+     "lon": -82.10516
+    },
+    {
+     "lat": 41.8,
+     "lon": -82.10258
+    },
+    {
+     "lat": 41.8,
+     "lon": -82.10129
+    },
+    {
+     "lat": 41.8,
+     "lon": -82.1
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Elm St"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000005,
+   "geometry": [
+    {
+     "lat": 41.8,
+     "lon": -82.1
+    },
+    {
+     "lat": 41.8,
+     "lon": -82.09871
+    },
+    {
+     "lat": 41.8,
+     "lon": -82.09742
+    },
+    {
+     "lat": 41.8,
+     "lon": -82.09484
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Elm St"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000006,
+   "geometry": [
+    {
+     "lat": 41.80165,
+     "lon": -82.10516
+    },
+    {
+     "lat": 41.80165,
+     "lon": -82.10258
+    },
+    {
+     "lat": 41.80165,
+     "lon": -82.10129
+    },
+    {
+     "lat": 41.80165,
+     "lon": -82.1
+    },
+    {
+     "lat": 41.80165,
+     "lon": -82.09742
+    },
+    {
+     "lat": 41.80165,
+     "lon": -82.09484
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Maple Ave"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000007,
+   "geometry": [
+    {
+     "lat": 41.8,
+     "lon": -82.10258
+    },
+    {
+     "lat": 41.80165,
+     "lon": -82.10258
+    },
+    {
+     "lat": 41.8033,
+     "lon": -82.10258
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Walnut St"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000008,
+   "geometry": [
+    {
+     "lat": 41.8,
+     "lon": -82.1
+    },
+    {
+     "lat": 41.80165,
+     "lon": -82.1
+    },
+    {
+     "lat": 41.8033,
+     "lon": -82.1
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Cedar St"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000010,
+   "geometry": [
+    {
+     "lat": 41.8,
+     "lon": -82.10129
+    },
+    {
+     "lat": 41.80082,
+     "lon": -82.10129
+    },
+    {
+     "lat": 41.80165,
+     "lon": -82.10129
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Park Ln"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000011,
+   "geometry": [
+    {
+     "lat": 41.8,
+     "lon": -82.09871
+    },
+    {
+     "lat": 41.79945,
+     "lon": -82.09871
+    },
+    {
+     "lat": 41.7989,
+     "lon": -82.09871
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Willow Ct"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000012,
+   "geometry": [
+    {
+     "lat": 41.8,
+     "lon": -82.10129
+    },
+    {
+     "lat": 41.79918,
+     "lon": -82.10129
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Spruce St"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000013,
+   "geometry": [
+    {
+     "lat": 41.79907,
+     "lon": -82.10129
+    },
+    {
+     "lat": 41.79835,
+     "lon": -82.10129
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Spruce St"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000014,
+   "geometry": [
+    {
+     "lat": 41.79835,
+     "lon": -82.10258
+    },
+    {
+     "lat": 41.79835,
+     "lon": -82.10129
+    },
+    {
+     "lat": 41.79835,
+     "lon": -82.09963
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Lakeview Dr"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000015,
+   "geometry": [
+    {
+     "lat": 41.80082,
+     "lon": -82.10774
+    },
+    {
+     "lat": 41.80082,
+     "lon": -82.10516
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Pine St"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000016,
+   "geometry": [
+    {
+     "lat": 41.80082,
+     "lon": -82.09484
+    },
+    {
+     "lat": 41.80082,
+     "lon": -82.09263
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Ash St"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000017,
+   "geometry": [
+    {
+     "lat": 41.8033,
+     "lon": -82.1
+    },
+    {
+     "lat": 41.80467,
+     "lon": -82.1
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Hill St"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000018,
+   "geometry": [
+    {
+     "lat": 41.80008,
+     "lon": -82.1024
+    },
+    {
+     "lat": 41.80008,
+     "lon": -82.10018
+    },
+    {
+     "lat": 41.80157,
+     "lon": -82.10018
+    },
+    {
+     "lat": 41.80157,
+     "lon": -82.1024
+    },
+    {
+     "lat": 41.80008,
+     "lon": -82.1024
+    }
+   ],
+   "tags": {
+    "leisure": "park",
+    "name": "Elm Park"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000019,
+   "geometry": [
+    {
+     "lat": 41.79992,
+     "lon": -82.09724
+    },
+    {
+     "lat": 41.79992,
+     "lon": -82.09502
+    },
+    {
+     "lat": 41.79863,
+     "lon": -82.09502
+    },
+    {
+     "lat": 41.79863,
+     "lon": -82.09724
+    },
+    {
+     "lat": 41.79992,
+     "lon": -82.09724
+    }
+   ],
+   "tags": {
+    "amenity": "school",
+    "name": "Springwood Elementary"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000020,
+   "geometry": [
+    {
+     "lat": 41.79995,
+     "lon": -82.10498
+    },
+    {
+     "lat": 41.79995,
+     "lon": -82.10276
+    }
+   ],
+   "tags": {
+    "highway": "footway",
+    "footway": "sidewalk"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000021,
+   "geometry": [
+    {
+     "lat": 41.8,
+     "lon": -82.09742
+    },
+    {
+     "lat": 41.80082,
+     "lon": -82.09742
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Birch St"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000022,
+   "geometry": [
+    {
+     "lat": 41.80082,
+     "lon": -82.09742
+    },
+    {
+     "lat": 41.80165,
+     "lon": -82.09742
+    },
+    {
+     "lat": 41.8033,
+     "lon": -82.09742
+    }
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Oak St"
+   }
+  },
+  {
+   "type": "way",
+   "id": 9000023,
+   "geometry": [
+    {
+     "lat": 41.80082,
+     "lon": -82.09484
+    },
+    {
+     "lat": 41.80082,
+     "lon": -82.09742
+    },
+    {
+     "lat": 41.80082,
+     "lon": -82.09797
+    }
+   ],
+   "tags": {
+    "highway": "secondary",
+    "name": "Mill Rd"
+   }
+  }
+ ]
+}

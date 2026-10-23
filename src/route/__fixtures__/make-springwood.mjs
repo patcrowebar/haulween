@@ -70,16 +70,26 @@ const elements = [
   way({ highway: 'footway', footway: 'sidewalk' }, [[-1350, -20], [-750, -20]]),
 ];
 
-const response = {
+const birch = elements.find((e) => e.tags.name === 'Birch St');
+const millRd = [
+  ...elements.filter((e) => e !== birch),
+  street('Birch St', 'residential', [[700, 0], [700, 300]]),
+  street('Oak St', 'residential', [[700, 300], [700, 600], [700, 1200]]),
+  street('Mill Rd', 'secondary', [[1400, 300], [700, 300], [550, 300]]),
+];
+
+const response = (els) => ({
   version: 0.6,
   generator: 'Overpass API (hand-made Haulween test fixture; not real data)',
   osm3s: {
     timestamp_osm_base: '2026-10-01T00:00:00Z',
     copyright: 'Made-up test data in the OpenStreetMap response format. Describes no real place.',
   },
-  elements,
-};
+  elements: els,
+});
 
-const out = fileURLToPath(new URL('./springwood.overpass.json', import.meta.url));
-writeFileSync(out, JSON.stringify(response, null, 1) + '\n');
-console.log(`wrote ${elements.length} ways to ${out}`);
+for (const [file, els] of [['springwood.overpass.json', elements], ['springwood-mill-rd.overpass.json', millRd]]) {
+  const out = fileURLToPath(new URL(`./${file}`, import.meta.url));
+  writeFileSync(out, JSON.stringify(response(els), null, 1) + '\n');
+  console.log(`wrote ${els.length} ways to ${out}`);
+}
