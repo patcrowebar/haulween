@@ -1,7 +1,38 @@
 // Address lookup. The street address goes to the geocoder and nowhere else.
 // Nominatim first; if it fails or pushes back, Photon. Both are behind the same interface.
 
-import { SessionCache, ServiceError } from './cache';
+import { RequestError, SessionCache, TimeoutError, browserIsOnline, fetchTextWithin, type FailKind } from './cache';
+
+type Fetch = typeof fetch;
+
+export const LOOKUP_TIMEOUT_MS = 10_000;
+
+const MESSAGES: Record<FailKind, string> = {
+  busy: 'Address search is busy. Wait a minute and try again.',
+  timeout: "Address search didn't answer in time. Wait a minute and try again.",
+  offline: "Couldn't reach address search. Check your connection and try again.",
+  bad: "Address search sent something we couldn't read. Try again in a minute.",
+};
+
+/** GET some JSON within the time limit, turning every failure into a RequestError. */
+async function getJson<T>(fetchFn: Fetch, url: string, init: RequestInit, ms: number, isOnline: () => boolean): Promise<T> {
+  let res: Response, text: string;
+  try {
+    ({ res, text } = await fetchTextWithin(fetchFn, url, init, ms));
+  } catch (e) {
+    const kind = e instanceof TimeoutError ? 'timeout' : isOnline() ? 'busy' : 'offline';
+    throw new RequestError(MESSAGES[kind], kind);
+  }
+  if (!res.ok) {
+    const kind = res.status === 429 || res.status === 503 || res.status === 504 ? 'busy' : 'bad';
+    throw new RequestError(MESSAGES[kind], kind, res.status);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new RequestError(MESSAGES.bad, 'bad', res.status);
+  }
+}
 
 export type Place = {
   lat: number;
@@ -19,7 +50,7 @@ export interface Geocoder {
   search(address: string): Promise<Place | null>;
 }
 
-type Fetch = typeof fetch;
+export type LookupOptions = { timeoutMs?: number; isOnline?: () => boolean };
 
 /** Lets at most one request start per `gapMs`. Nominatim asks for 1 per second. */
 export class Throttle {
@@ -38,16 +69,19 @@ const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 export class NominatimGeocoder implements Geocoder {
   readonly name = 'Nominatim' as const;
   readonly credit = 'Address search by Nominatim, © OpenStreetMap contributors';
-  constructor(private fetchFn: Fetch = (...a) => fetch(...a), private throttle = new Throttle(1000)) {}
+  constructor(
+    private fetchFn: Fetch = (...a) => fetch(...a),
+    private throttle = new Throttle(1000),
+    private options: LookupOptions = {},
+  ) {}
 
   async search(address: string): Promise<Place | null> {
     await this.throttle.wait();
     const q = new URLSearchParams({ q: address, format: 'jsonv2', limit: '1', addressdetails: '1' });
-    const res = await this.fetchFn(`https://nominatim.openstreetmap.org/search?${q}`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (!res.ok) throw new ServiceError('Address search is busy right now.', res.status);
-    const rows = (await res.json()) as Array<{ lat: string; lon: string; address?: Record<string, string> }>;
+    const rows = await getJson<Array<{ lat: string; lon: string; address?: Record<string, string> }>>(
+      this.fetchFn, `https://nominatim.openstreetmap.org/search?${q}`, { headers: { Accept: 'application/json' } },
+      this.options.timeoutMs ?? LOOKUP_TIMEOUT_MS, this.options.isOnline ?? browserIsOnline,
+    );
     if (!rows.length) return null;
     const a = rows[0].address ?? {};
     const town = a.city ?? a.town ?? a.village ?? a.hamlet ?? a.suburb ?? '';
@@ -63,15 +97,14 @@ export class NominatimGeocoder implements Geocoder {
 export class PhotonGeocoder implements Geocoder {
   readonly name = 'Photon' as const;
   readonly credit = 'Address search by Photon (Komoot), © OpenStreetMap contributors';
-  constructor(private fetchFn: Fetch = (...a) => fetch(...a)) {}
+  constructor(private fetchFn: Fetch = (...a) => fetch(...a), private options: LookupOptions = {}) {}
 
   async search(address: string): Promise<Place | null> {
     const q = new URLSearchParams({ q: address, limit: '1' });
-    const res = await this.fetchFn(`https://photon.komoot.io/api/?${q}`);
-    if (!res.ok) throw new ServiceError('Address search is busy right now.', res.status);
-    const body = (await res.json()) as {
+    const body = await getJson<{
       features: Array<{ geometry: { coordinates: [number, number] }; properties: Record<string, string> }>;
-    };
+    }>(this.fetchFn, `https://photon.komoot.io/api/?${q}`, {}, this.options.timeoutMs ?? LOOKUP_TIMEOUT_MS,
+      this.options.isOnline ?? browserIsOnline);
     const f = body.features[0];
     if (!f) return null;
     const p = f.properties;
@@ -99,7 +132,7 @@ export class FallbackGeocoder {
     if (!key) return null;
     const hit = this.cache.get(key);
     if (hit !== undefined) return hit;
-    let lastError: unknown;
+    const kinds: FailKind[] = [];
     for (const g of this.geocoders) {
       try {
         const place = await g.search(address.trim());
@@ -107,9 +140,10 @@ export class FallbackGeocoder {
         this.cache.set(key, place);
         return place;
       } catch (e) {
-        lastError = e;
+        kinds.push(e instanceof RequestError ? e.kind : 'bad');
       }
     }
-    throw lastError instanceof ServiceError ? lastError : new ServiceError("Couldn't reach address search. Check your connection.");
+    const kind = (['offline', 'busy', 'timeout', 'bad'] as const).find((k) => kinds.includes(k)) ?? 'bad';
+    throw new RequestError(MESSAGES[kind], kind);
   }
 }

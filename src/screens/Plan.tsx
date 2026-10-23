@@ -8,7 +8,7 @@ import { OverpassClient } from '../data/overpass';
 import { WeatherClient, type Tonight } from '../data/weather';
 import type { OsmData, Pt } from '../route/types';
 import Results from './Results';
-import { Planner } from './planner';
+import { PLAN_FAILED, Planner } from './planner';
 import {
   DEFAULT_FORM, asksDoorTime, doorSecondsFor, youngestAge, type PlanForm, type PlanOnce, type PlanOutcome,
 } from './planning';
@@ -121,7 +121,7 @@ export default function Plan() {
           lastPlace.current = { address: f.address.trim(), place };
         }
         const home: Pt = [place.lat, place.lng];
-        setStep('Getting the streets around you…');
+        setStep('Getting the streets…');
         const wx = weather.tonight(place.lat, place.lng, f.date, hourOf(f.start), hourOf(f.end));
         const data = await overpass.streetsNear(place.lat, place.lng);
         next = { home, label: place.label || 'Home', data, demo: false };
@@ -130,7 +130,7 @@ export default function Plan() {
           setWeatherNote('No forecast for that night yet. Open-Meteo forecasts about two weeks ahead.');
         });
       }
-      setStep('Planning the walk… (a few seconds)');
+      setStep('Planning your route…');
       await show(next, f);
       setStatus('done');
       requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ block: 'start' }));
@@ -173,8 +173,13 @@ export default function Plan() {
     let p = byDoor.current.get(seconds);
     if (!p) {
       setPendingDoor(seconds);
-      p = (await planner.run(found.data, found.home, f, seconds).catch(() => null)) ?? undefined;
+      let failed: string | null = null;
+      p = await planner.run(found.data, found.home, f, seconds).catch((e: unknown) => {
+        failed = e instanceof Error ? e.message : PLAN_FAILED;
+        return undefined;
+      });
       if (tap === lastTap.current) setPendingDoor(null);
+      if (failed && failed !== 'cancelled' && gen === generation.current && tap === lastTap.current) setError(failed);
       if (!p || gen !== generation.current) return;
       byDoor.current.set(seconds, p);
     }
@@ -268,8 +273,16 @@ export default function Plan() {
         {error && <p className="error" role="alert">{error}</p>}
 
         <button className="primary" type="submit" disabled={status === 'working'}>
-          {status === 'working' ? step || 'Planning…' : outcome ? 'Plan again' : 'Plan my route'}
+          {status === 'working' ? step || 'Working…' : outcome ? 'Plan again' : 'Plan my route'}
         </button>
+        <p className="step" role="status" aria-live="polite">
+          {status === 'working' && (
+            <>
+              <span className="spinner" aria-hidden="true" />
+              {step || 'Working…'}
+            </>
+          )}
+        </p>
         {!demo && (
           <button type="button" className="secondary" onClick={startDemo} disabled={status === 'working'}>
             Try the demo: 1428 Elm St

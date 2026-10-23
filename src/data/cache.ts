@@ -44,3 +44,44 @@ export class ServiceError extends Error {
     super(message);
   }
 }
+
+/** Why a request failed, so the message can say what to do about it. */
+export type FailKind = 'offline' | 'busy' | 'timeout' | 'bad';
+
+export class RequestError extends ServiceError {
+  constructor(message: string, readonly kind: FailKind, status?: number) {
+    super(message, status);
+  }
+}
+
+export class TimeoutError extends Error {}
+
+/**
+ * fetch with a time limit that covers the whole answer, body included. Aborts the request and
+ * rejects with TimeoutError when it runs out; other failures reject as fetch would.
+ */
+export async function fetchTextWithin(
+  fetchFn: typeof fetch, url: string, init: RequestInit, ms: number,
+): Promise<{ res: Response; text: string }> {
+  const ctl = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      ctl.abort();
+      reject(new TimeoutError(`no answer in ${ms} ms`));
+    }, ms);
+  });
+  const answer = (async () => {
+    const res = await fetchFn(url, { ...init, signal: ctl.signal });
+    return { res, text: await res.text() };
+  })();
+  answer.catch(() => {}); // once the limit wins, a late failure here is expected and ignored
+  try {
+    return await Promise.race([answer, limit]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** A real network failure, or a service refusing us? Browsers report both as a TypeError. */
+export const browserIsOnline = () => typeof navigator === 'undefined' || navigator.onLine !== false;

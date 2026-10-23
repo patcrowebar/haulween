@@ -1,7 +1,9 @@
 // Sunset and weather for the night, from Open-Meteo (no key). Gets a point rounded to
 // 2 decimals (about 1 km): plenty for weather, and less precise than anything else we send.
 
-import { SessionCache, ServiceError } from './cache';
+import { SessionCache, ServiceError, fetchTextWithin } from './cache';
+
+export const WEATHER_TIMEOUT_MS = 10_000;
 
 export type Tonight = {
   date: string;
@@ -33,7 +35,7 @@ export function flagsFor(t: Tonight): TonightFlags {
 
 export class WeatherClient {
   private cache = new SessionCache<Tonight>('haulween.wx.');
-  constructor(private fetchFn: Fetch = (...a) => fetch(...a)) {}
+  constructor(private fetchFn: Fetch = (...a) => fetch(...a), private timeoutMs = WEATHER_TIMEOUT_MS) {}
 
   /** Weather between startHour and endHour (24h) on date, e.g. "2026-10-31". */
   async tonight(lat: number, lng: number, date: string, startHour: number, endHour: number): Promise<Tonight> {
@@ -46,14 +48,14 @@ export class WeatherClient {
       hourly: 'temperature_2m,apparent_temperature,precipitation_probability',
       temperature_unit: 'fahrenheit', timezone: 'auto', start_date: date, end_date: date,
     });
-    let res: Response;
+    let res: Response, text: string;
     try {
-      res = await this.fetchFn(`https://api.open-meteo.com/v1/forecast?${q}`);
+      ({ res, text } = await fetchTextWithin(this.fetchFn, `https://api.open-meteo.com/v1/forecast?${q}`, {}, this.timeoutMs));
     } catch {
       throw new ServiceError("Couldn't get the weather.");
     }
     if (!res.ok) throw new ServiceError('No weather forecast for that night yet.', res.status);
-    const body = (await res.json()) as {
+    const body = JSON.parse(text) as {
       daily: { sunset: string[] };
       hourly: { time: string[]; temperature_2m: number[]; apparent_temperature: number[]; precipitation_probability: number[] };
     };
