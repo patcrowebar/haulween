@@ -6,6 +6,8 @@ Haulween plans one safe Halloween walking route from home that hits the most hou
 
 Built in public. Fork it and run it for your own neighborhood.
 
+**Live site:** https://haulween.vercel.app (deploys from `main`)
+
 ## Run it
 
 Needs Node 24 or newer (see `.nvmrc`).
