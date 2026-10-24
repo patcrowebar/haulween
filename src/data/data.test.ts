@@ -58,7 +58,7 @@ describe('Overpass client', () => {
     expect(urls(fetchFn)).toEqual([OVERPASS_URL, OVERPASS_BACKUP_URL]);
   });
 
-  it('gives up after the backup, saying the service is busy', async () => {
+  it('gives up after the backup, saying the service is busy when one of them said so', async () => {
     const fetchFn = vi.fn((url: string) => json({}, url === OVERPASS_URL ? 500 : 429));
     const c = new OverpassClient(fetchFn as unknown as typeof fetch, new SessionCache('t.', null));
     await expect(c.streetsNear(41.8, -82.1)).rejects.toThrow('The street map service is busy. Wait a minute and try again.');

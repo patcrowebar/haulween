@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { DOOR_SECONDS_CHOICES, PLACEHOLDER_ADDRESS } from '../config';
 import { FallbackGeocoder, type Place } from '../data/geocoder';
-import { OverpassClient } from '../data/overpass';
+import { OverpassClient, type Attempt } from '../data/overpass';
 import { WeatherClient, type Tonight } from '../data/weather';
 import type { OsmData, Pt } from '../route/types';
 import Results from './Results';
@@ -18,7 +18,9 @@ import { parseClock } from '../route/schedule';
 
 const FORM_KEY = 'haulween.form';
 const geocoder = new FallbackGeocoder();
-const overpass = new OverpassClient();
+/** ?debug listens here for each street-data request. */
+let onAttempt: (a: Attempt) => void = () => {};
+const overpass = new OverpassClient(undefined, undefined, { onAttempt: (a) => onAttempt(a) });
 const weather = new WeatherClient();
 const planner = new Planner();
 
@@ -48,6 +50,8 @@ const NO_ROUTE = "We couldn't make a safe walk from here with these streets. Try
 
 export default function Plan({ onNight }: { onNight: () => void }) {
   const wantsDemo = useMemo(() => new URLSearchParams(window.location.search).has('demo'), []);
+  const debug = useMemo(() => new URLSearchParams(window.location.search).has('debug'), []);
+  const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [form, setForm] = useState<PlanForm>(loadForm);
   const [demo, setDemo] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
@@ -261,6 +265,12 @@ export default function Plan({ onNight }: { onNight: () => void }) {
   }
 
   useEffect(() => {
+    if (!debug) return;
+    onAttempt = (a) => setAttempts((list) => [...list, a]);
+    return () => { onAttempt = () => {}; };
+  }, [debug]);
+
+  useEffect(() => {
     if (wantsDemo) startDemo();
     else reopen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -382,6 +392,7 @@ export default function Plan({ onNight }: { onNight: () => void }) {
             </>
           )}
         </p>
+        {debug && <DebugPanel attempts={attempts} onClear={() => setAttempts([])} />}
         {!demo && (
           <button type="button" className="secondary" onClick={startDemo} disabled={status === 'working'}>
             Try the demo: 1428 Elm St
@@ -401,5 +412,41 @@ export default function Plan({ onNight }: { onNight: () => void }) {
         {keepNote && <p className="muted small">{keepNote}</p>}
       </div>
     </main>
+  );
+}
+
+/** Which browser engine this is, from the user agent: on an iPhone every browser is WebKit. */
+function engine(): string {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua)) return `WebKit (iOS${/CriOS/.test(ua) ? ', Chrome' : /FxiOS/.test(ua) ? ', Firefox' : ', Safari'})`;
+  if (/Firefox\//.test(ua)) return 'Gecko (Firefox)';
+  if (/Chrome\/|Chromium\//.test(ua)) return 'Blink (Chrome)';
+  if (/AppleWebKit/.test(ua)) return 'WebKit (Safari)';
+  return 'unknown';
+}
+
+/**
+ * ?debug: each street-data request this visit, on screen. Server, HTTP status, time and error
+ * type only. Never the address, coordinates, the query or any key.
+ */
+function DebugPanel({ attempts, onClear }: { attempts: Attempt[]; onClear: () => void }) {
+  return (
+    <section className="debug" aria-label="Street data requests (debug)">
+      <h3>Debug: street data</h3>
+      <p className="small">Browser: {engine()} · {navigator.onLine === false ? 'offline' : 'online'}</p>
+      {attempts.length === 0 ? (
+        <p className="small muted">No street-data requests yet. Press "Plan my route".</p>
+      ) : (
+        <ol className="small">
+          {attempts.map((a, i) => (
+            <li key={i}>
+              <strong>{a.server}</strong> · {a.status === null ? 'no answer' : `HTTP ${a.status}`} · {(a.ms / 1000).toFixed(1)} s
+              {' · '}{a.outcome}{a.error ? ` · ${a.error}` : ''}{a.bytes ? ` · ${a.bytes < 1024 ? `${a.bytes} B` : `${Math.round(a.bytes / 1024)} KB`}` : ''}
+            </li>
+          ))}
+        </ol>
+      )}
+      <button type="button" className="link" onClick={onClear}>Clear</button>
+    </section>
   );
 }

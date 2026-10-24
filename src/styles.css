@@ -741,3 +741,24 @@ button {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
+
+/* ---------- ?debug ---------- */
+
+.debug {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px dashed #3a3d55;
+  border-radius: 10px;
+  font-family: ui-monospace, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
+.debug h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.debug ol {
+  margin: 6px 0;
+  padding-left: 28px;
+}

@@ -2,7 +2,9 @@
 // Nominatim first; if it fails or pushes back, Photon. Both are behind the same interface.
 
 import { isNum, withDefaults } from '../stored';
-import { RequestError, SessionCache, TimeoutError, browserIsOnline, fetchTextWithin, type FailKind } from './cache';
+import {
+  RequestError, SessionCache, TimeoutError, browserIsOnline, fetchTextWithin, worstOf, type FailKind,
+} from './cache';
 
 type Fetch = typeof fetch;
 
@@ -10,6 +12,8 @@ export const LOOKUP_TIMEOUT_MS = 10_000;
 
 const MESSAGES: Record<FailKind, string> = {
   busy: 'Address search is busy. Wait a minute and try again.',
+  down: 'Address search is having trouble right now. Try again in a few minutes.',
+  unreachable: "Couldn't get an answer from address search. Try again in a minute, or on another network.",
   timeout: "Address search didn't answer in time. Wait a minute and try again.",
   offline: "Couldn't reach address search. Check your connection and try again.",
   bad: "Address search sent something we couldn't read. Try again in a minute.",
@@ -21,11 +25,12 @@ async function getJson<T>(fetchFn: Fetch, url: string, init: RequestInit, ms: nu
   try {
     ({ res, text } = await fetchTextWithin(fetchFn, url, init, ms));
   } catch (e) {
-    const kind = e instanceof TimeoutError ? 'timeout' : isOnline() ? 'busy' : 'offline';
+    // No answer reached the page: that says nothing about why, so it isn't called "busy".
+    const kind = e instanceof TimeoutError ? 'timeout' : isOnline() ? 'unreachable' : 'offline';
     throw new RequestError(MESSAGES[kind], kind);
   }
   if (!res.ok) {
-    const kind = res.status === 429 || res.status === 503 || res.status === 504 ? 'busy' : 'bad';
+    const kind = res.status === 429 || res.status === 504 ? 'busy' : res.status >= 500 ? 'down' : 'bad';
     throw new RequestError(MESSAGES[kind], kind, res.status);
   }
   try {
@@ -169,7 +174,7 @@ export class FallbackGeocoder {
         kinds.push(e instanceof RequestError ? e.kind : 'bad');
       }
     }
-    const kind = (['offline', 'busy', 'timeout', 'bad'] as const).find((k) => kinds.includes(k)) ?? 'bad';
+    const kind = worstOf(kinds);
     throw new RequestError(MESSAGES[kind], kind);
   }
 }

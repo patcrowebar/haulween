@@ -45,8 +45,21 @@ export class ServiceError extends Error {
   }
 }
 
-/** Why a request failed, so the message can say what to do about it. */
-export type FailKind = 'offline' | 'busy' | 'timeout' | 'bad';
+/**
+ * Why a request failed, so the message can say what to do about it.
+ * - busy: the service said so, with a real 429 or 504.
+ * - down: it answered with some other error (a 5xx, or an error page or note).
+ * - unreachable: no answer reached the page at all while the device is online. Browsers report a
+ *   refused, blocked or dropped request the same way ("Load failed", "Failed to fetch"), so this
+ *   says only that, not why.
+ * - timeout: no full answer in time. offline: the device has no connection.
+ * - bad: an answer we couldn't read.
+ */
+export type FailKind = 'offline' | 'busy' | 'down' | 'unreachable' | 'timeout' | 'bad';
+
+/** When two servers fail differently, the one to tell the parent: the most useful first. */
+export const FAIL_ORDER: readonly FailKind[] = ['offline', 'busy', 'down', 'timeout', 'unreachable', 'bad'];
+export const worstOf = (kinds: FailKind[]): FailKind => FAIL_ORDER.find((k) => kinds.includes(k)) ?? 'bad';
 
 export class RequestError extends ServiceError {
   constructor(message: string, readonly kind: FailKind, status?: number) {
@@ -54,7 +67,9 @@ export class RequestError extends ServiceError {
   }
 }
 
-export class TimeoutError extends Error {}
+export class TimeoutError extends Error {
+  name = 'TimeoutError';
+}
 
 /**
  * fetch with a time limit that covers the whole answer, body included. Aborts the request and
