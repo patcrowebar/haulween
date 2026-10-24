@@ -201,29 +201,30 @@ export function makeSchedule(segments: Segment[], o: ScheduleOptions): Schedule 
   };
 }
 
+/** Google Maps' limit on stops after the start, on phones. */
+export const MAPS_MAX_STOPS = 9;
+
 /**
- * Google Maps walking links: one waypoint per street (its far end), split into legs over the
- * waypoint limit. Coordinates only, never the address.
+ * One Google Maps walking link for the next stretch: from the start of row `from`, through the far
+ * end of each row after it, up to `maxStops` stops. Street points only, never the address.
+ * null once the route is done.
  */
-export function mapsLinks(home: Pt, segments: Segment[], maxWaypoints = 9): string[] {
-  const wps: Pt[] = [];
-  for (const s of segments) {
+export function nextStretchLink(segments: Segment[], from = 0, maxStops = MAPS_MAX_STOPS): string | null {
+  const rows = segments.slice(Math.max(0, from)).filter((s) => s.points.length >= 2);
+  if (!rows.length) return null;
+  const same = (a: Pt, b: Pt) => Math.abs(a[0] - b[0]) < 1e-5 && Math.abs(a[1] - b[1]) < 1e-5;
+  const origin = rows[0].points[0];
+  const stops: Pt[] = [];
+  for (const s of rows) {
     const pt = s.points[s.points.length - 1];
-    const last = wps[wps.length - 1];
-    if (pt && (!last || Math.abs(last[0] - pt[0]) > 1e-5 || Math.abs(last[1] - pt[1]) > 1e-5)) wps.push(pt);
+    if (!same(stops[stops.length - 1] ?? origin, pt)) stops.push(pt);
+    if (stops.length === maxStops) break;
   }
-  const loc = (p: Pt) => `${p[0]},${p[1]}`;
-  const stops = [home, ...wps, home];
-  const links: string[] = [];
-  for (let i = 0; i < stops.length - 1; ) {
-    const chunk = stops.slice(i, i + maxWaypoints + 2);
-    const q = new URLSearchParams({
-      api: '1', origin: loc(chunk[0]), destination: loc(chunk[chunk.length - 1]), travelmode: 'walking',
-    });
-    const mids = chunk.slice(1, -1);
-    if (mids.length) q.set('waypoints', mids.map(loc).join('|'));
-    links.push(`https://www.google.com/maps/dir/?${q.toString().replace(/%2C/g, ',').replace(/%7C/g, '|')}`);
-    i += chunk.length - 1;
-  }
-  return links;
+  if (!stops.length) return null;
+  const loc = (p: Pt) => `${Number(p[0].toFixed(6))},${Number(p[1].toFixed(6))}`;
+  const q = new URLSearchParams({
+    api: '1', origin: loc(origin), destination: loc(stops[stops.length - 1]), travelmode: 'walking',
+  });
+  if (stops.length > 1) q.set('waypoints', stops.slice(0, -1).map(loc).join('|'));
+  return `https://www.google.com/maps/dir/?${q.toString().replace(/%2C/g, ',').replace(/%7C/g, '|')}`;
 }

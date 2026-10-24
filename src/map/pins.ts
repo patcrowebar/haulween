@@ -28,20 +28,12 @@ export function pointAt(pts: Pt[], frac: number): Pt {
   return [...pts[pts.length - 1]] as Pt;
 }
 
-/** Nudge a spot onto rings around it until it clears Home and the other pins. */
-function spread(spot: Pt, home: Pt, taken: Pt[]): Pt {
-  const candidates: Pt[] = [spot];
-  for (const r of [1.2, 2.4, 3.6]) {
-    for (let a = 0; a < 8; a++) {
-      candidates.push([
-        spot[0] + r * MIN_DEG * Math.sin((a * Math.PI) / 4),
-        spot[1] + r * MIN_DEG * 1.3 * Math.cos((a * Math.PI) / 4),
-      ]);
-    }
-  }
-  const clear = (c: Pt) => ddist(c, home) >= HOME_DEG && taken.every((t) => ddist(c, t) >= MIN_DEG);
-  return candidates.find(clear) ?? candidates[candidates.length - 1];
-}
+/**
+ * Where along its street a pin may go: the reference's preferred spots first, then every 2.5%
+ * of the way. A pin always sits on its own street line, never beside it. (The reference pushed
+ * a crowded pin onto rings around the street, which once left pin 15 off the route near Home.)
+ */
+export const SPOTS = [0.5, 0.35, 0.65, 0.2, 0.8, 0.1, 0.9, ...Array.from({ length: 41 }, (_, i) => i / 40)];
 
 /** One pin per schedule row, numbered like the schedule. */
 export function placePins(segments: Segment[], home: Pt): Pin[] {
@@ -49,15 +41,17 @@ export function placePins(segments: Segment[], home: Pt): Pin[] {
   const pins: Pin[] = [];
   segments.forEach((s, i) => {
     if (!s.points.length) return;
-    let spot: Pt | null = null;
-    for (const f of [0.5, 0.35, 0.65, 0.2, 0.8, 0.1, 0.9]) {
+    // The first clear spot; failing that, the one that crowds Home and the other pins least.
+    const crowding = (c: Pt) => 10 * Math.max(0, HOME_DEG - ddist(c, home))
+      + taken.reduce((t, o) => t + Math.max(0, MIN_DEG - ddist(c, o)), 0);
+    let spot: Pt | null = null, least = Infinity;
+    for (const f of SPOTS) {
       const c = pointAt(s.points, f);
-      if (ddist(c, home) >= HOME_DEG && taken.every((t) => ddist(c, t) >= MIN_DEG)) {
-        spot = c;
-        break;
-      }
+      const k = crowding(c);
+      if (k < least) { least = k; spot = c; }
+      if (k === 0) break;
     }
-    spot ??= spread(pointAt(s.points, 0.5), home, taken);
+    if (!spot) return;
     taken.push(spot);
     pins.push({ n: i + 1, lat: spot[0], lng: spot[1], name: s.name });
   });
@@ -112,40 +106,42 @@ export function placeLabels(
 }
 
 /**
- * Pins placed on screen, so none covers Home or another pin at the map's real zoom. Each pin
- * tries spots along its own street first, then rings around the street's middle.
+ * Where the Home label covers, around Home's point on screen: it sits just above the point, on a
+ * little pointer, so the street right at Home stays clear for a pin (a short last row back home
+ * can lie entirely within a label's width of Home).
+ */
+export const HOME_BOX = { halfWidth: 36, above: 47, below: 17 };
+
+/**
+ * Pins placed on screen, so none covers Home or another pin at the map's real zoom when its
+ * street has room. Each pin stays on its own street line, wherever on it there's most room.
  */
 export function placePinsOnScreen(
   segments: Segment[],
   home: Pt,
   project: (p: Pt) => [number, number],
   unproject: (xy: [number, number]) => Pt,
-  homeHalf: [number, number] = [36, 15],
   pinHalf = 16,
 ): Pin[] {
   const [hx, hy] = project(home);
-  const boxes: Box[] = [[hx - homeHalf[0], hy - homeHalf[1], hx + homeHalf[0], hy + homeHalf[1]]];
+  const boxes: Box[] = [[hx - HOME_BOX.halfWidth, hy - HOME_BOX.above, hx + HOME_BOX.halfWidth, hy - HOME_BOX.below]];
   const boxAt = ([x, y]: [number, number]): Box => [x - pinHalf, y - pinHalf, x + pinHalf, y + pinHalf];
-  const clear = (b: Box) => boxes.every((o) => !overlaps(o, b));
+  const area = (a: Box, b: Box) =>
+    Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  // Covering Home is much worse than touching another pin.
+  const crowding = (b: Box) => boxes.reduce((t, o, k) => t + area(o, b) * (k === 0 ? 10 : 1), 0);
   const pins: Pin[] = [];
   segments.forEach((s, i) => {
     if (!s.points.length) return;
-    let spot: [number, number] | null = null;
-    for (const f of [0.5, 0.35, 0.65, 0.2, 0.8, 0.1, 0.9]) {
+    // Always on the pin's own street: the first clear spot, or the least crowded one.
+    let spot: [number, number] | null = null, least = Infinity;
+    for (const f of SPOTS) {
       const xy = project(pointAt(s.points, f));
-      if (clear(boxAt(xy))) { spot = xy; break; }
+      const k = crowding(boxAt(xy));
+      if (k < least) { least = k; spot = xy; }
+      if (k === 0) break;
     }
-    if (!spot) {
-      const [mx, my] = project(pointAt(s.points, 0.5));
-      for (const r of [36, 56, 76, 96]) {
-        for (let a = 0; a < 8 && !spot; a++) {
-          const xy: [number, number] = [mx + r * Math.cos((a * Math.PI) / 4), my + r * Math.sin((a * Math.PI) / 4)];
-          if (clear(boxAt(xy))) spot = xy;
-        }
-        if (spot) break;
-      }
-    }
-    spot ??= project(pointAt(s.points, 0.5));
+    if (!spot) return;
     boxes.push(boxAt(spot));
     const [lat, lng] = unproject(spot);
     pins.push({ n: i + 1, lat, lng, name: s.name });

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { HOME, SPRINGWOOD } from '../route/__fixtures__/springwood';
-import { DEFAULT_FORM, ampm, asksDoorTime, makePlan, matchAvoid, nextHalloween, parseAges, youngestAge } from './planning';
+import {
+  DEFAULT_FORM, ampm, asksDoorTime, leftOut, makePlan, matchAvoid, nextHalloween, parseAges, routeTitle, youngestAge,
+} from './planning';
+import { planRoute } from '../route/plan';
 import { PLACEHOLDER_ADDRESS } from '../config';
 
 const form = { ...DEFAULT_FORM, address: PLACEHOLDER_ADDRESS, start: '17:00', end: '20:00' };
@@ -54,9 +57,53 @@ describe('makePlan', () => {
     for (let i = 1; i < houses.length; i++) expect(houses[i]).toBeGreaterThanOrEqual(houses[i - 1]);
   });
 
+  it('shows the street crossings for each door time next to its houses', () => {
+    const out = makePlan(SPRINGWOOD, HOME, { ...form, ages: '10, 13' });
+    for (const e of out.estimates!) {
+      const r = planRoute(SPRINGWOOD, HOME, { startTime: '17:00', endTime: '20:00', youngestAge: 10, doorSeconds: e.seconds });
+      if (!r.ok) throw new Error('plan failed');
+      expect(e.crossings).toBe(r.plan.schedule.totals.streetCrossings);
+      expect(e.crossings).toBeGreaterThan(0);
+    }
+  });
+
   it('leaves out a street the parent wants to avoid', () => {
     const out = makePlan(SPRINGWOOD, HOME, { ...form, ages: '10', avoid: 'Maple Ave' });
     if (!out.result.ok) throw new Error('plan failed');
     expect(out.result.plan.segments.some((s) => s.name.includes('Maple'))).toBe(false);
+  });
+});
+
+describe('the results title', () => {
+  it('uses the street and the town, short street names', () => {
+    expect(routeTitle({ road: 'Elm Street', town: 'Springwood' })).toBe('Your route from Elm St, Springwood');
+  });
+
+  it('falls back to the street alone when there is no town', () => {
+    expect(routeTitle({ road: 'Walnut Street', town: '' })).toBe('Your route from Walnut St');
+    expect(routeTitle({ road: '', town: '' })).toBe('Your route from home');
+  });
+});
+
+describe('the left-out list', () => {
+  it('uses short street names, and says "part of" for a street also on the route', () => {
+    const out = leftOut({ 'Birch Avenue': 12, 'Maple Avenue': 6, 'Maple Ave': 2, 'Oak Court': 3 }, ['Maple Avenue', 'Elm Street']);
+    expect(out).toEqual([
+      { text: 'Birch Ave', houses: 12 },
+      { text: 'part of Maple Ave', houses: 8 },
+      { text: 'Oak Ct', houses: 3 },
+    ]);
+  });
+
+  it('on the Springwood plan, every left-out street on the route says "part of"', () => {
+    const r = planRoute(SPRINGWOOD, HOME, { startTime: '17:00', endTime: '18:30', youngestAge: 6 });
+    if (!r.ok) throw new Error('plan failed');
+    const list = leftOut(r.plan.skipped, r.plan.walked);
+    expect(list.length).toBeGreaterThan(0);
+    const walked = new Set(r.plan.walked);
+    for (const name of Object.keys(r.plan.skipped)) {
+      const text = list.find((l) => l.text.endsWith(name))!.text;
+      expect(text).toBe(walked.has(name) ? `part of ${name}` : name);
+    }
   });
 });

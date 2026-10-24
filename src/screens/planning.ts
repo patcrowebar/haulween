@@ -4,6 +4,7 @@
 import { ASK_DOOR_TIME_FROM_AGE, DEFAULT_DOOR_SECONDS, DOOR_SECONDS_CHOICES } from '../config';
 import { shortName } from '../route/geo';
 import { planRoute, type PlanResult } from '../route/plan';
+import { replanFromHere, type Here, type ReplanOptions, type ReplanResult, type Visited } from '../route/replan';
 import { findPocket } from '../route/pocket';
 import type { OsmData, Pt } from '../route/types';
 
@@ -80,7 +81,14 @@ export function matchAvoid(text: string, data: OsmData, home: Pt): AvoidResult {
 }
 
 /** houses: null when no route fits; undefined while it's still being worked out. */
-export type DoorEstimate = { seconds: number; houses: number | null | undefined };
+export type DoorEstimate = { seconds: number; houses: number | null | undefined; crossings?: number };
+
+/** Houses and street crossings for one door time's plan, for the door-time choices. */
+export function doorEstimate(seconds: number, r: PlanResult): DoorEstimate {
+  return r.ok
+    ? { seconds, houses: r.plan.estimate.houses, crossings: r.plan.schedule.totals.streetCrossings }
+    : { seconds, houses: null };
+}
 
 export type PlanOutcome = {
   result: PlanResult;
@@ -104,6 +112,16 @@ export function planOnce(data: OsmData, home: Pt, form: PlanForm, doorSeconds: n
   return { result, avoid, youngest };
 }
 
+/** Work for the planning worker: a plan at one door time, or a Night Mode replan. */
+export type Job =
+  | { kind: 'plan'; data: OsmData; home: Pt; form: PlanForm; doorSeconds: number }
+  | { kind: 'replan'; data: OsmData; home: Pt; options: ReplanOptions; here: Here; visited: Visited[] };
+
+export function runJob(job: Job): PlanOnce | ReplanResult {
+  if (job.kind === 'plan') return planOnce(job.data, job.home, job.form, job.doorSeconds);
+  return replanFromHere(job.data, job.home, job.options, job.here, job.visited);
+}
+
 /** The door time to plan with: the visitor's pick when we ask, otherwise the default. */
 export function doorSecondsFor(form: PlanForm): number {
   return asksDoorTime(youngestAge(form.ages)) ? form.doorSeconds : DEFAULT_DOOR_SECONDS;
@@ -115,12 +133,42 @@ export function makePlan(data: OsmData, home: Pt, form: PlanForm): PlanOutcome {
   const main = planOnce(data, home, form, doorSeconds);
   const estimates = asksDoorTime(main.youngest)
     ? DOOR_SECONDS_CHOICES.map((s) => {
-      const r = s === doorSeconds ? main.result : planOnce(data, home, form, s).result;
-      return { seconds: s, houses: r.ok ? r.plan.estimate.houses : null };
+      return doorEstimate(s, s === doorSeconds ? main.result : planOnce(data, home, form, s).result);
     })
     : null;
   return { ...main, estimates };
 }
+
+/** "Your route from Elm St, Springwood", or "Your route from Elm St" when there's no town. */
+export function routeTitle(place: { road: string; town: string }): string {
+  const where = [shortName(place.road.trim()), place.town.trim()].filter(Boolean).join(', ');
+  return `Your route from ${where || 'home'}`;
+}
+
+export type LeftOut = { text: string; houses: number };
+
+/**
+ * The "left out to fit the time" list: short street names, and "part of Maple Ave" for a
+ * street that's also on the route. Most houses first.
+ */
+export function leftOut(skipped: Record<string, number>, walked: string[]): LeftOut[] {
+  const onRoute = new Set(walked.map(shortName));
+  const byName = new Map<string, number>();
+  for (const [name, houses] of Object.entries(skipped)) {
+    const n = shortName(name);
+    byName.set(n, (byName.get(n) ?? 0) + houses);
+  }
+  return [...byName]
+    .map(([n, houses]) => ({ text: onRoute.has(n) ? `part of ${n}` : n, houses }))
+    .sort((a, b) => b.houses - a.houses);
+}
+
+const PATTERN_TEXT: Record<string, string> = {
+  zigzag: 'Zigzag: both sides as you go',
+  'walk through, skip the houses': 'Walk through, skip the houses',
+};
+/** A schedule row's pattern, as a sentence. */
+export const patternText = (p: string) => PATTERN_TEXT[p] ?? p.charAt(0).toUpperCase() + p.slice(1);
 
 /** "17:07" -> "5:07 pm" */
 export function ampm(hhmm: string): string {

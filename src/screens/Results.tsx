@@ -1,11 +1,10 @@
 // The plan: totals and head-home times, door time, tonight's weather, the map, the schedule.
 
-import { Suspense, lazy } from 'react';
-import { routeLine } from '../map/pins';
+import { Suspense, lazy, useState } from 'react';
 import type { Plan } from '../route/plan';
-import { mapsLinks } from '../route/schedule';
+import { nextStretchLink } from '../route/schedule';
 import { flagsFor, type Tonight } from '../data/weather';
-import { ampm, type PlanForm, type PlanOutcome } from './planning';
+import { ampm, leftOut, patternText, type PlanForm, type PlanOutcome } from './planning';
 
 // MapLibre is most of the app's size; load it once there's a route to draw.
 const RouteMap = lazy(() => import('../map/RouteMap'));
@@ -14,31 +13,28 @@ type Props = {
   outcome: PlanOutcome;
   plan: Plan;
   form: PlanForm;
-  label: string;
+  title: string;
   demo: boolean;
   tonight: Tonight | null;
   weatherNote: string | null;
   onDoor: (seconds: number) => void;
   /** A door time that's being planned right now. */
   pendingDoor: number | null;
+  /** Open Night Mode with this plan; `sound` is whether to beep at turn-around time. */
+  onStartNight: (sound: boolean) => void;
 };
 
-const PATTERN_TEXT: Record<string, string> = {
-  zigzag: 'Zigzag: both sides as you go',
-  'walk through, skip the houses': 'Walk through, skip the houses',
-};
-const patternText = (p: string) => PATTERN_TEXT[p] ?? p.charAt(0).toUpperCase() + p.slice(1);
-
-export default function Results({ outcome, plan, form, label, demo, tonight, weatherNote, onDoor, pendingDoor }: Props) {
+export default function Results({ outcome, plan, form, title, demo, tonight, weatherNote, onDoor, pendingDoor, onStartNight }: Props) {
   const { schedule, estimate, segments } = plan;
   const leg = schedule.lastLeg;
-  const links = mapsLinks(routeLine(segments)[0], segments);
-  const skipped = Object.entries(plan.skipped).sort((a, b) => b[1] - a[1]);
+  const link = nextStretchLink(segments, 0);
+  const skipped = leftOut(plan.skipped, plan.walked);
   const { avoid } = outcome;
+  const [sound, setSound] = useState(false);
 
   return (
     <section className="results" aria-labelledby="results-title">
-      <h2 id="results-title">Your route from {label}</h2>
+      <h2 id="results-title">{title}</h2>
 
       <div className="stats">
         <div className="stat big">
@@ -66,7 +62,7 @@ export default function Results({ outcome, plan, form, label, demo, tonight, wea
       {outcome.estimates && (
         <fieldset className="panel doors">
           <legend>How long at each door?</legend>
-          <p className="muted small">Older kids are quicker. Tap one to see how many houses it fits.</p>
+          <p className="muted small">Older kids are quicker. Tap one to see how many houses it fits, and how many streets you'll cross.</p>
           <div className="door-grid">
             {outcome.estimates.map((e) => (
               <label key={e.seconds} className={`door ${form.doorSeconds === e.seconds ? 'on' : ''}`}>
@@ -80,6 +76,9 @@ export default function Results({ outcome, plan, form, label, demo, tonight, wea
                     ? 'planning…'
                     : e.houses === undefined ? 'tap to see' : e.houses === null ? 'no route fits' : `~${e.houses} houses`}
                 </span>
+                {typeof e.houses === 'number' && e.crossings !== undefined && pendingDoor !== e.seconds && (
+                  <span className="door-h">{e.crossings} {e.crossings === 1 ? 'crossing' : 'crossings'}</span>
+                )}
               </label>
             ))}
           </div>
@@ -88,8 +87,17 @@ export default function Results({ outcome, plan, form, label, demo, tonight, wea
 
       <TonightCard tonight={tonight} note={weatherNote} demo={demo} />
 
+      <div className="panel start-night">
+        <button type="button" className="primary huge" onClick={() => onStartNight(sound)}>Start the night</button>
+        <label className="check">
+          <input type="checkbox" checked={sound} onChange={(e) => setSound(e.target.checked)} />
+          <span>Play a sound when it's time to turn around</span>
+        </label>
+        <p className="muted small">Night Mode follows you street by street. The plan is saved on this phone, so it works with no signal.</p>
+      </div>
+
       <Suspense fallback={<div className="map-wrap"><div className="map" aria-busy="true" /></div>}>
-        <RouteMap plan={plan} demo={demo} />
+        <RouteMap segments={segments} lines={plan.pocket} demo={demo} />
       </Suspense>
 
       <h3>Street by street</h3>
@@ -123,7 +131,7 @@ export default function Results({ outcome, plan, form, label, demo, tonight, wea
       {(skipped.length > 0 || avoid.exclude.length > 0 || avoid.notFound.length > 0 || avoid.alreadyOff.length > 0) && (
         <div className="panel notes">
           {skipped.length > 0 && (
-            <p>Left out to fit the time: {skipped.map(([n, h]) => `${n} (~${h})`).join(', ')}.</p>
+            <p>Left out to fit the time: {skipped.map((s) => `${s.text} (~${s.houses})`).join(', ')}.</p>
           )}
           {avoid.exclude.length > 0 && <p>Skipping, as you asked: {avoid.exclude.join(', ')}.</p>}
           {avoid.alreadyOff.length > 0 && <p>{avoid.alreadyOff.join(', ')}: busy, so it's off the route already.</p>}
@@ -131,14 +139,12 @@ export default function Results({ outcome, plan, form, label, demo, tonight, wea
         </div>
       )}
 
-      <div className="handoff">
-        {links.map((href, i) => (
-          <a key={href} className="primary button" href={href} target="_blank" rel="noopener noreferrer">
-            Open in Google Maps{links.length > 1 ? `, part ${i + 1} of ${links.length}` : ''}
-          </a>
-        ))}
-        <p className="muted small">Google Maps gets the street points of the route, not your address.</p>
-      </div>
+      {link && (
+        <p className="handoff small">
+          <a href={link} target="_blank" rel="noopener noreferrer">Open the next stretch in Google Maps</a>
+          <span className="muted"> · street points only, never your address</span>
+        </p>
+      )}
 
       <p className="muted small footnote">
         House counts are estimates from the length of each street, minus parks, schools and corners.

@@ -8,10 +8,13 @@ import { OverpassClient } from '../data/overpass';
 import { WeatherClient, type Tonight } from '../data/weather';
 import type { OsmData, Pt } from '../route/types';
 import Results from './Results';
+import { freshProgress, loadNight, saveNight, type NightPlan } from './nightStore';
 import { PLAN_FAILED, Planner } from './planner';
 import {
-  DEFAULT_FORM, asksDoorTime, doorSecondsFor, youngestAge, type PlanForm, type PlanOnce, type PlanOutcome,
+  DEFAULT_FORM, asksDoorTime, doorEstimate, doorSecondsFor, routeTitle, youngestAge, type PlanForm, type PlanOnce,
+  type PlanOutcome,
 } from './planning';
+import { parseClock } from '../route/schedule';
 
 const FORM_KEY = 'haulween.form';
 const geocoder = new FallbackGeocoder();
@@ -20,7 +23,7 @@ const weather = new WeatherClient();
 const planner = new Planner();
 
 type Status = 'idle' | 'working' | 'done';
-type Found = { home: Pt; label: string; data: OsmData; demo: boolean };
+type Found = { home: Pt; title: string; data: OsmData; demo: boolean };
 
 function loadForm(): PlanForm {
   try {
@@ -41,10 +44,9 @@ function saveForm(form: PlanForm) {
 }
 
 const hourOf = (hhmm: string) => Number(hhmm.split(':')[0]);
-const housesOf = (p: PlanOnce) => (p.result.ok ? p.result.plan.estimate.houses : null);
 const NO_ROUTE = "We couldn't make a safe walk from here with these streets. Try a longer window or fewer roads to avoid.";
 
-export default function Plan() {
+export default function Plan({ onNight }: { onNight: () => void }) {
   const wantsDemo = useMemo(() => new URLSearchParams(window.location.search).has('demo'), []);
   const [form, setForm] = useState<PlanForm>(loadForm);
   const [demo, setDemo] = useState(false);
@@ -64,6 +66,8 @@ export default function Plan() {
   /** The door time being planned after a tap, for its "planning…" label. */
   const [pendingDoor, setPendingDoor] = useState<number | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const [saved] = useState(() => loadNight());
+  const [startError, setStartError] = useState<string | null>(null);
 
   const set = <K extends keyof PlanForm>(k: K, v: PlanForm[K]) => setForm((f) => ({ ...f, [k]: v }));
   const youngest = youngestAge(form.ages);
@@ -82,7 +86,7 @@ export default function Plan() {
     setOutcome({
       ...main,
       estimates: asksDoorTime(main.youngest)
-        ? DOOR_SECONDS_CHOICES.map((s) => ({ seconds: s, houses: s === door ? housesOf(main) : undefined }))
+        ? DOOR_SECONDS_CHOICES.map((s) => (s === door ? doorEstimate(s, main.result) : { seconds: s, houses: undefined }))
         : null,
     });
     if (!main.result.ok) setError(NO_ROUTE);
@@ -103,7 +107,7 @@ export default function Plan() {
       let next: Found;
       if (asDemo) {
         const { DEMO } = await import('../demo');
-        next = { home: DEMO.home, label: DEMO.label, data: DEMO.data, demo: true };
+        next = { home: DEMO.home, title: DEMO.title, data: DEMO.data, demo: true };
         setTonight(DEMO.tonight);
         setWeatherNote(null);
       } else {
@@ -124,7 +128,7 @@ export default function Plan() {
         setStep('Getting the streets…');
         const wx = weather.tonight(place.lat, place.lng, f.date, hourOf(f.start), hourOf(f.end));
         const data = await overpass.streetsNear(place.lat, place.lng);
-        next = { home, label: place.label || 'Home', data, demo: false };
+        next = { home, title: routeTitle(place), data, demo: false };
         wx.then((t) => { setTonight(t); setWeatherNote(null); }).catch(() => {
           setTonight(null);
           setWeatherNote('No forecast for that night yet. Open-Meteo forecasts about two weeks ahead.');
@@ -186,7 +190,7 @@ export default function Plan() {
     const done = p;
     setOutcome((o) => {
       if (!o) return o;
-      const estimates = o.estimates?.map((e) => (e.seconds === seconds ? { ...e, houses: housesOf(done) } : e)) ?? null;
+      const estimates = o.estimates?.map((e) => (e.seconds === seconds ? doorEstimate(seconds, done.result) : e)) ?? null;
       return tap === lastTap.current ? { ...done, estimates } : { ...o, estimates };
     });
     if (tap === lastTap.current) setError(done.result.ok ? null : NO_ROUTE);
@@ -196,6 +200,29 @@ export default function Plan() {
     if (wantsDemo) startDemo();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Save the plan on this phone and open Night Mode. */
+  function startNight(sound: boolean) {
+    if (!found || !outcome?.result.ok) return;
+    const p = outcome.result.plan;
+    const door = doorSecondsFor(form);
+    const night: NightPlan = {
+      v: 1, title: found.title, demo: found.demo, date: form.date, home: found.home,
+      options: {
+        startTime: form.start, endTime: form.end, youngestAge: outcome.youngest, stroller: form.stroller,
+        doorSeconds: door, exclude: outcome.avoid.exclude,
+      },
+      start: parseClock(form.start),
+      segments: p.segments,
+      schedule: p.schedule,
+      lines: { streetLines: p.pocket.streetLines, busyRoads: p.pocket.busyRoads, areas: p.pocket.areas },
+    };
+    if (!saveNight(night, found.data, freshProgress(night, sound))) {
+      setStartError("This phone wouldn't let Haulween save the plan, so Night Mode can't start. Check that private browsing is off.");
+      return;
+    }
+    onNight();
+  }
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -208,6 +235,13 @@ export default function Plan() {
         <h1>Haulween</h1>
         <p className="muted">Plan your epic candy haul and be home on time.</p>
       </header>
+
+      {saved && (
+        <div className="panel resume">
+          <p><strong>Tonight's walk is saved on this phone.</strong> {saved.title}.</p>
+          <button type="button" className="primary" onClick={onNight}>Back to Night Mode</button>
+        </div>
+      )}
 
       {demo && (
         <div className="banner" role="status">
@@ -293,10 +327,12 @@ export default function Plan() {
       <div ref={resultsRef}>
         {found && outcome?.result.ok && (
           <Results
-            outcome={outcome} plan={outcome.result.plan} form={form} label={found.label}
+            outcome={outcome} plan={outcome.result.plan} form={form} title={found.title}
             demo={found.demo} tonight={tonight} weatherNote={weatherNote} onDoor={chooseDoor} pendingDoor={pendingDoor}
+            onStartNight={startNight}
           />
         )}
+        {startError && <p className="error" role="alert">{startError}</p>}
       </div>
     </main>
   );

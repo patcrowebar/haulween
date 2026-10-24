@@ -1,19 +1,29 @@
 // The route on a MapLibre map: orange walk, numbered pins, Home snapped onto its street,
-// busy roads dashed, credits always showing.
+// busy roads dashed, credits always showing. In Night Mode, also a dot for where you are and
+// the streets you've finished.
 
 import { useEffect, useRef } from 'react';
 import { AttributionControl, LngLatBounds, Map as MapLibreMap, Marker, NavigationControl, setWorkerUrl } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
-import type { Plan } from '../route/plan';
+import type { Segment } from '../route/optimize';
 import type { NamedLine, Pt } from '../route/types';
-import { placeLabels, placePinsOnScreen, routeLine, type Box } from './pins';
+import { HOME_BOX, placeLabels, placePinsOnScreen, routeLine, type Box } from './pins';
 import { COLORS, CREDITS, DEMO_CREDITS, OPENFREEMAP_STYLE, demoStyle, recolor } from './style';
 
 // MapLibre looks for its worker next to its own file, which a bundler moves. Point it there.
 setWorkerUrl(workerUrl);
 
-type Props = { plan: Plan; demo: boolean };
+type Props = {
+  segments: Segment[];
+  lines: { streetLines: NamedLine[]; busyRoads: NamedLine[]; areas: NamedLine[] };
+  demo: boolean;
+  /** Night Mode: where GPS puts you (stays on this phone). */
+  you?: Pt | null;
+  done?: boolean[];
+  current?: number;
+  tall?: boolean;
+};
 
 const lngLat = (p: Pt): [number, number] => [p[1], p[0]];
 const lines = (ls: NamedLine[]) => ({
@@ -34,13 +44,18 @@ function pinElement(className: string, text: string, label: string): HTMLElement
   return el;
 }
 
-export default function RouteMap({ plan, demo }: Props) {
+export default function RouteMap({ segments, lines: pocket, demo, you = null, done, current, tall }: Props) {
   const box = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const pinEls = useRef<HTMLElement[]>([]);
+  const youMarker = useRef<Marker | null>(null);
+  /** Marks finished streets on the pins; runs again once the pins exist. */
+  const paintPins = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!box.current) return;
-    const route = routeLine(plan.segments);
-    const home = route[0];
+    const route = routeLine(segments);
+    const home = route[route.length - 1]; // every walk ends at Home, even a replan that starts elsewhere
     const bounds = route.reduce((b, p) => b.extend(lngLat(p)), new LngLatBounds(lngLat(home), lngLat(home)));
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
@@ -59,9 +74,10 @@ export default function RouteMap({ plan, demo }: Props) {
     map.touchZoomRotate.disableRotation();
 
     const markers: Marker[] = [];
+    mapRef.current = map;
+    pinEls.current = [];
     map.on('load', () => {
       if (!demo) recolor(map);
-      const { pocket } = plan;
       map.addSource('areas', {
         type: 'geojson',
         data: {
@@ -102,7 +118,7 @@ export default function RouteMap({ plan, demo }: Props) {
         return [lat, lng];
       };
       // Placed on screen at the starting zoom, so no number hides Home or another number.
-      const pins = placePinsOnScreen(plan.segments, home, project, unproject);
+      const pins = placePinsOnScreen(segments, home, project, unproject);
       if (demo) {
         // No basemap labels in the demo, so name the streets, clear of the pins and Home.
 
@@ -113,31 +129,60 @@ export default function RouteMap({ plan, demo }: Props) {
         const { clientWidth, clientHeight } = map.getContainer();
         const controls: Box = [clientWidth - 64, 0, clientWidth, 116]; // zoom buttons
         const credits: Box = [clientWidth - 260, clientHeight - 28, clientWidth, clientHeight];
-        const taken = [controls, credits, around(home, 34, 14), ...pins.map((p) => around([p.lat, p.lng], 16, 16))];
+        const [hx, hy] = project(home);
+        const homeBox: Box = [hx - HOME_BOX.halfWidth, hy - HOME_BOX.above, hx + HOME_BOX.halfWidth, hy - HOME_BOX.below];
+        const taken = [controls, credits, homeBox, ...pins.map((p) => around([p.lat, p.lng], 16, 16))];
         const named = [...pocket.streetLines, ...pocket.busyRoads];
         for (const l of placeLabels(named, taken, project, [clientWidth, clientHeight])) {
           markers.push(new Marker({ element: pinElement('map-label', l.name, l.name) }).setLngLat([l.lng, l.lat]).addTo(map));
         }
       }
       for (const pin of pins) {
-        markers.push(
-          new Marker({ element: pinElement('map-pin', String(pin.n), `${pin.n}. ${pin.name}`) })
-            .setLngLat([pin.lng, pin.lat])
-            .addTo(map),
-        );
+        const el = pinElement('map-pin', String(pin.n), `${pin.n}. ${pin.name}`);
+        pinEls.current[pin.n - 1] = el;
+        markers.push(new Marker({ element: el }).setLngLat([pin.lng, pin.lat]).addTo(map));
       }
-      markers.push(new Marker({ element: pinElement('map-home', 'Home', 'Home') }).setLngLat(lngLat(home)).addTo(map));
+      paintPins.current();
+      // Home sits just above its point on its street, so the street itself stays clear for pins.
+      markers.push(new Marker({ element: pinElement('map-home', 'Home', 'Home'), anchor: 'bottom', offset: [0, -HOME_BOX.below] })
+        .setLngLat(lngLat(home)).addTo(map));
     });
 
     return () => {
       markers.forEach((m) => m.remove());
+      youMarker.current?.remove();
+      youMarker.current = null;
+      mapRef.current = null;
       map.remove();
     };
-  }, [plan, demo]);
+  }, [segments, pocket, demo]);
+
+  // Finished streets fade; the one you're on stands out.
+  useEffect(() => {
+    const paint = () => pinEls.current.forEach((el, i) => {
+      el?.classList.toggle('done', !!done?.[i]);
+      el?.classList.toggle('now', current === i);
+    });
+    paintPins.current = paint;
+    paint();
+  }, [done, current, segments]);
+
+  // The dot for where you are.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!you) {
+      youMarker.current?.remove();
+      youMarker.current = null;
+      return;
+    }
+    if (!youMarker.current) youMarker.current = new Marker({ element: pinElement('map-you', '', 'You are here') });
+    youMarker.current.setLngLat(lngLat(you)).addTo(map);
+  }, [you, segments]);
 
   return (
     <div className="map-wrap">
-      <div ref={box} className="map" role="region" aria-label="Map of the route with numbered streets and Home" />
+      <div ref={box} className={`map${tall ? ' tall' : ''}`} role="region" aria-label="Map of the route with numbered streets and Home" />
       <p className="map-key">
         <span className="key-route" /> Your route <span className="key-busy" /> Busy road: stay off
       </p>

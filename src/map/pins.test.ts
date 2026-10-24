@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { HOME, SPRINGWOOD } from '../route/__fixtures__/springwood';
 import { planRoute } from '../route/plan';
+import { replanFromHere } from '../route/replan';
 import { findPocket } from '../route/pocket';
-import { placeLabels, placePins, placePinsOnScreen, pointAt, routeLine } from './pins';
+import { Geo, segDist } from '../route/geo';
+import type { Segment } from '../route/optimize';
+import { placeLabels, placePins, placePinsOnScreen, pointAt, routeLine, type Pin } from './pins';
+
+/** Feet from each pin to its own row's street line. */
+const offLine = (pins: Pin[], segs: Segment[], home: [number, number]) => {
+  const geo = new Geo(home);
+  return pins.map((p) => segDist(geo.xy([p.lat, p.lng]), segs[p.n - 1].points.map((q) => geo.xy(q))));
+};
 
 describe('placePins', () => {
   const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '8:00pm', youngestAge: 10 });
@@ -22,6 +31,10 @@ describe('placePins', () => {
         expect(Math.hypot(pins[i].lat - pins[j].lat, pins[i].lng - pins[j].lng)).toBeGreaterThanOrEqual(0.00025 - 1e-12);
       }
     }
+  });
+
+  it('puts every pin on its own street line', () => {
+    for (const d of offLine(pins, segs, home)) expect(d).toBeLessThan(1);
   });
 
   it('starts the walk at Home snapped onto Elm St, not at the doorstep', () => {
@@ -66,20 +79,69 @@ describe('placeLabels', () => {
 });
 
 describe('placePinsOnScreen', () => {
-  it('keeps every pin off Home and off each other, even zoomed far out', () => {
+  it('keeps every pin off Home and off each other at the zoom the map opens at', () => {
     const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '8:00pm', youngestAge: 10 });
     if (!r.ok) throw new Error('plan failed');
-    const home = routeLine(r.plan.segments)[0];
-    // Zoomed out so far that the whole neighborhood is ~120 px across: pins must spread out.
-    const k = 15000;
-    const project = (p: [number, number]): [number, number] => [(p[1] + 82.1) * k + 200, (41.8 - p[0]) * k + 200];
-    const unproject = ([x, y]: [number, number]): [number, number] => [41.8 - (y - 200) / k, (x - 200) / k - 82.1];
+    const route = routeLine(r.plan.segments);
+    const home = route[0];
+    // The map fits the route into a phone-width map (358 x 380 px) with 40 px padding. At this
+    // latitude a degree north is about 1.34 times as many pixels as a degree east (Web Mercator).
+    const ky = 1 / Math.cos((41.8 * Math.PI) / 180);
+    const spanX = Math.max(...route.map((p) => p[1])) - Math.min(...route.map((p) => p[1]));
+    const spanY = (Math.max(...route.map((p) => p[0])) - Math.min(...route.map((p) => p[0]))) * ky;
+    const k = Math.min((358 - 80) / spanX, (380 - 80) / spanY);
+    const project = (p: [number, number]): [number, number] => [(p[1] + 82.1) * k + 200, (41.8 - p[0]) * k * ky + 200];
+    const unproject = ([x, y]: [number, number]): [number, number] => [41.8 - (y - 200) / (k * ky), (x - 200) / k - 82.1];
     const pins = placePinsOnScreen(r.plan.segments, home, project, unproject);
     const [hx, hy] = project(home);
     const boxes = pins.map((p) => { const [x, y] = project([p.lat, p.lng]); return [x - 16, y - 16, x + 16, y + 16]; });
     const hit = (a: number[], b: number[]) => a[0] < b[2] - 1e-6 && b[0] < a[2] - 1e-6 && a[1] < b[3] - 1e-6 && b[1] < a[3] - 1e-6;
-    for (const b of boxes) expect(hit(b, [hx - 36, hy - 15, hx + 36, hy + 15])).toBe(false);
+    for (const b of boxes) expect(hit(b, [hx - 36, hy - 47, hx + 36, hy - 17])).toBe(false);
     for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(hit(boxes[i], boxes[j])).toBe(false);
     expect(pins.map((p) => p.n)).toEqual(r.plan.segments.map((_, i) => i + 1));
+  });
+
+  it('keeps every pin on its own street line, even when that street is crowded near Home', () => {
+    // Pin 15 on a real route sat off the route near Home: its street had no clear spot, so it
+    // was pushed onto a ring around the street's middle. Now it stays on the street.
+    const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '8:00pm', youngestAge: 10 });
+    if (!r.ok) throw new Error('plan failed');
+    const home = routeLine(r.plan.segments)[0];
+    for (const k of [8000, 15000, 40000, 90000]) {
+      const project = (p: [number, number]): [number, number] => [(p[1] + 82.1) * k + 200, (41.8 - p[0]) * k + 200];
+      const unproject = ([x, y]: [number, number]): [number, number] => [41.8 - (y - 200) / k, (x - 200) / k - 82.1];
+      const pins = placePinsOnScreen(r.plan.segments, home, project, unproject);
+      // On screen, within a pixel of the line.
+      const ftPerPx = 364000 / k;
+      for (const d of offLine(pins, r.plan.segments, home)) expect(d / ftPerPx).toBeLessThan(1);
+    }
+  });
+
+  it('keeps a replan\'s short last stretch home on its street and off Home', () => {
+    const opts = { startTime: '17:00', endTime: '20:00', youngestAge: 10, doorSeconds: 45 };
+    const r = planRoute(SPRINGWOOD, HOME, opts);
+    if (!r.ok) throw new Error('plan failed');
+    const s = r.plan.segments;
+    const res = replanFromHere(SPRINGWOOD, HOME, { ...opts, now: 19 * 60 }, { row: s[1], at: null },
+      [{ points: s[0].points, pattern: s[0].pattern }]);
+    if (!res.ok) throw new Error('replan failed');
+    const segs = res.plan.segments;
+    const route = routeLine(segs);
+    const home = route[route.length - 1];
+    const ky = 1 / Math.cos((41.8 * Math.PI) / 180);
+    const spanX = Math.max(...route.map((p) => p[1])) - Math.min(...route.map((p) => p[1]));
+    const spanY = (Math.max(...route.map((p) => p[0])) - Math.min(...route.map((p) => p[0]))) * ky;
+    const k = Math.min((358 - 80) / spanX, (380 - 80) / spanY);
+    const project = (p: [number, number]): [number, number] => [(p[1] + 82.1) * k + 200, (41.8 - p[0]) * k * ky + 200];
+    const unproject = ([x, y]: [number, number]): [number, number] => [41.8 - (y - 200) / (k * ky), (x - 200) / k - 82.1];
+    const pins = placePinsOnScreen(segs, home, project, unproject);
+    const [hx, hy] = project(home);
+    for (const p of pins) {
+      const [x, y] = project([p.lat, p.lng]);
+      const overHome = x - 16 < hx + 36 && hx - 36 < x + 16 && y - 16 < hy - 17 && hy - 47 < y + 16;
+      expect(overHome).toBe(false);
+    }
+    const ftPerPx = 364000 / (k * ky);
+    for (const d of offLine(pins, segs, home)) expect(d / ftPerPx).toBeLessThan(1);
   });
 });

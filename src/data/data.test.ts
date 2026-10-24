@@ -71,7 +71,14 @@ describe('geocoder', () => {
 
   it('reads a Nominatim answer', async () => {
     const g = new NominatimGeocoder(() => json(nominatimRow), noWait);
-    expect(await g.search(PLACEHOLDER_ADDRESS)).toEqual({ lat: 41.8, lng: -82.1, label: 'Elm Street, Springwood', source: 'Nominatim' });
+    expect(await g.search(PLACEHOLDER_ADDRESS)).toEqual({ lat: 41.8, lng: -82.1, road: 'Elm Street', town: 'Springwood', source: 'Nominatim' });
+  });
+
+  it('takes the town, not a small local area name', async () => {
+    const row = [{ lat: '41.8', lon: '-82.1', address: { road: 'Elm Street', suburb: 'Lakeview', hamlet: 'Lakeview', town: 'Springwood' } }];
+    expect(await new NominatimGeocoder(() => json(row), noWait).search(PLACEHOLDER_ADDRESS)).toMatchObject({ town: 'Springwood' });
+    const noTown = [{ lat: '41.8', lon: '-82.1', address: { road: 'Elm Street', neighbourhood: 'Lakeview', suburb: 'Lakeview' } }];
+    expect(await new NominatimGeocoder(() => json(noTown), noWait).search(PLACEHOLDER_ADDRESS)).toMatchObject({ town: '' });
   });
 
   it('switches to Photon when Nominatim pushes back', async () => {

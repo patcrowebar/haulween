@@ -7,7 +7,7 @@ import type { Pt } from './types';
 
 const pocket = findPocket(SPRINGWOOD, HOME);
 const seg = (name: string, points: Pt[]): Segment => ({
-  name, points, lengthFt: 0, housesLeft: 0, housesRight: 0, pattern: 'walk_through', why: '',
+  name, street: name, points, lengthFt: 0, housesLeft: 0, housesRight: 0, pattern: 'walk_through', why: '',
 });
 
 describe('checkRoute', () => {

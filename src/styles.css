@@ -29,7 +29,7 @@ body {
   font-size: 18px;
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 h1,
@@ -363,12 +363,25 @@ button {
 }
 
 .map-home {
+  position: relative;
   padding: 3px 8px;
   border-radius: 8px;
   background: var(--text);
   color: var(--bg);
   border: 2px solid var(--orange);
   font: 700 13px/1.2 var(--font-body);
+}
+
+/* A stem down to Home's point on the street, so the street itself stays clear for pins. */
+.map-home::after {
+  content: '';
+  position: absolute;
+  left: calc(50% - 1.5px);
+  top: 100%;
+  width: 3px;
+  height: 17px;
+  background: var(--orange);
+  border-radius: 0 0 2px 2px;
 }
 
 .map-label {
@@ -531,4 +544,200 @@ button {
     animation: none;
     border-color: var(--orange);
   }
+}
+
+/* ---------- Start the night, resume ---------- */
+
+.huge {
+  min-height: 60px;
+  font-size: 1.2rem;
+  font-family: var(--font-display);
+}
+
+.start-night .check {
+  margin: 12px 0 0;
+}
+
+.start-night p {
+  margin: 8px 0 0;
+}
+
+.resume p {
+  margin: 0 0 12px;
+}
+
+.handoff {
+  margin: 16px 0 0;
+}
+
+.handoff a,
+.night .handoff a {
+  color: var(--orange);
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap);
+}
+
+/* ---------- Night Mode ---------- */
+
+.night {
+  min-height: 100vh;
+}
+
+.night-body {
+  padding-top: 12px;
+}
+
+.status-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+  color: var(--bg);
+  background: var(--on-track);
+  box-shadow: 0 2px 10px #0009;
+}
+
+.status-bar.behind {
+  background: var(--behind);
+}
+
+.status-bar.turn_around {
+  background: var(--turn-around);
+}
+
+.status-main {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.status-sub {
+  display: flex;
+  gap: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-banner {
+  position: sticky;
+  top: 64px;
+  z-index: 9;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 14px 16px;
+  background: #3a1512;
+  color: #ffd9d3;
+  border-bottom: 3px solid var(--turn-around);
+  font-size: 1.1rem;
+}
+
+.turn-banner strong {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  color: var(--turn-around);
+  width: 100%;
+}
+
+.turn-banner .link {
+  color: #ffd9d3;
+  margin-left: auto;
+}
+
+.now-card {
+  margin-top: 0;
+}
+
+.now-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.now-name {
+  margin: 4px 0;
+  font-size: 1.7rem;
+  color: var(--orange);
+}
+
+.now-how {
+  margin: 0 0 14px;
+}
+
+.map.tall {
+  height: min(52vh, 440px);
+}
+
+.map-you {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #6fb6ff;
+  border: 3px solid var(--text);
+  box-shadow: 0 0 0 6px #6fb6ff44;
+}
+
+.map-pin.done {
+  background: #3a3d55;
+  color: var(--muted);
+}
+
+.map-pin.now {
+  background: var(--text);
+  border-color: var(--orange);
+  transform: scale(1.15);
+}
+
+.where .secondary,
+.replan .secondary {
+  margin-top: 4px;
+}
+
+.where p,
+.replan p {
+  margin: 4px 0;
+}
+
+.night-rows li {
+  grid-template-columns: 32px 1fr auto;
+  align-items: center;
+}
+
+.night-rows li.now .row-name {
+  color: var(--orange);
+}
+
+.night-rows li.done .row-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.tick {
+  width: 52px;
+  height: 52px;
+  border: 2px solid #3a3d55;
+  background: transparent;
+  color: var(--bg);
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.tick.on {
+  border-color: var(--on-track);
+  background: var(--on-track);
+}
+
+.night-foot {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }

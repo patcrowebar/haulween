@@ -3,13 +3,13 @@
 // Nothing here can hang: a worker that fails to load or crashes hands its plans to the main
 // thread once, and every plan has a time limit. Failures come back as plain-words errors.
 
+import type { Here, ReplanOptions, ReplanResult, Visited } from '../route/replan';
 import type { OsmData, Pt } from '../route/types';
 import type { PlanRequest } from './plan.worker';
-import { planOnce, type PlanForm, type PlanOnce } from './planning';
+import { runJob, type Job, type PlanForm, type PlanOnce } from './planning';
 
-type Reply = { id: number; ok: true; value: PlanOnce } | { id: number; ok: false; error: string };
-type Args = [data: OsmData, home: Pt, form: PlanForm, doorSeconds: number];
-type Waiting = { args: Args; resolve: (v: PlanOnce) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
+type Reply = { id: number; ok: true; value: unknown } | { id: number; ok: false; error: string };
+type Waiting = { job: Job; resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
 
 export const PLAN_TIMEOUT_MS = 90_000;
 export const PLAN_FAILED = "Something went wrong while planning. Try again, or try a nearby address.";
@@ -72,14 +72,22 @@ export class Planner {
     const stranded = [...this.waiting.keys()];
     for (const id of stranded) {
       const w = this.take(id)!;
-      inline(w.args).then(w.resolve, w.reject);
+      inline(w.job).then(w.resolve, w.reject);
     }
   }
 
   run(data: OsmData, home: Pt, form: PlanForm, doorSeconds: number): Promise<PlanOnce> {
-    const args: Args = [data, home, form, doorSeconds];
+    return this.call({ kind: 'plan', data, home, form, doorSeconds }) as Promise<PlanOnce>;
+  }
+
+  /** Night Mode's "Replan from here". */
+  replan(data: OsmData, home: Pt, options: ReplanOptions, here: Here, visited: Visited[]): Promise<ReplanResult> {
+    return this.call({ kind: 'replan', data, home, options, here, visited }) as Promise<ReplanResult>;
+  }
+
+  private call(job: Job): Promise<unknown> {
     const worker = this.start();
-    if (!worker) return inline(args);
+    if (!worker) return inline(job);
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -89,9 +97,9 @@ export class Planner {
         this.worker = null;
         reject(new Error('Planning took too long. Try a shorter time window, then try again.'));
       }, this.timeoutMs);
-      this.waiting.set(id, { args, resolve, reject, timer });
+      this.waiting.set(id, { job, resolve, reject, timer });
       try {
-        worker.postMessage({ id, data, home, form, doorSeconds } satisfies PlanRequest);
+        worker.postMessage({ id, job } satisfies PlanRequest);
       } catch {
         this.crashed();
       }
@@ -107,11 +115,11 @@ export class Planner {
 }
 
 /** Plan on the main thread, with the same plain-words errors. */
-function inline(args: Args): Promise<PlanOnce> {
+function inline(job: Job): Promise<unknown> {
   return new Promise((resolve, reject) => {
     setTimeout(() => {
       try {
-        resolve(planOnce(...args));
+        resolve(runJob(job));
       } catch (e) {
         reject(new Error(friendlyPlanError(e instanceof Error ? e.message : '')));
       }

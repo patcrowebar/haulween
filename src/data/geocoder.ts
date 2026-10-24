@@ -37,8 +37,13 @@ async function getJson<T>(fetchFn: Fetch, url: string, init: RequestInit, ms: nu
 export type Place = {
   lat: number;
   lng: number;
-  /** Short label to show back to the visitor, e.g. "Elm St, Springwood". */
-  label: string;
+  /** The street, as the geocoder spells it ("Elm Street"); empty if it gave none. */
+  road: string;
+  /**
+   * The town or city, never a small local area name: a neighborhood, suburb or hamlet name
+   * ("Lakeview") means little to anyone else. Empty if there's none.
+   */
+  town: string;
   /** Who found it, for the credit line. */
   source: 'Nominatim' | 'Photon';
 };
@@ -84,11 +89,11 @@ export class NominatimGeocoder implements Geocoder {
     );
     if (!rows.length) return null;
     const a = rows[0].address ?? {};
-    const town = a.city ?? a.town ?? a.village ?? a.hamlet ?? a.suburb ?? '';
     return {
       lat: Number(rows[0].lat),
       lng: Number(rows[0].lon),
-      label: [a.road, town].filter(Boolean).join(', '),
+      road: a.road ?? '',
+      town: a.city ?? a.town ?? a.village ?? a.municipality ?? '',
       source: this.name,
     };
   }
@@ -111,7 +116,8 @@ export class PhotonGeocoder implements Geocoder {
     return {
       lat: f.geometry.coordinates[1],
       lng: f.geometry.coordinates[0],
-      label: [p.street ?? p.name, p.city ?? p.town ?? p.district].filter(Boolean).join(', '),
+      road: p.street ?? p.name ?? '',
+      town: p.city ?? p.town ?? p.village ?? '',
       source: this.name,
     };
   }

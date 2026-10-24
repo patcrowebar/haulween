@@ -2,7 +2,7 @@
 // Hard rule 3: a route that fails the check is never returned as a plan.
 
 import { checkRoute } from './check';
-import { buildGraph } from './graph';
+import { buildGraph, type Graph } from './graph';
 import { Planner, toSegments, type Segment } from './optimize';
 import { findPocket, type Pocket } from './pocket';
 import { budgetFor, makeSchedule, paceFor, type Schedule, type ScheduleOptions } from './schedule';
@@ -22,21 +22,41 @@ export type Plan = {
   estimate: { minutes: number; budget: number; houses: number; housesInPocket: number };
   /** Houses left out, by street. */
   skipped: Record<string, number>;
+  /** Every street the walk uses, houses or not. */
+  walked: string[];
 };
 
 export type PlanResult = { ok: true; plan: Plan } | { ok: false; problems: string[] };
 
 export function planRoute(data: OsmData, home: Pt, o: PlanOptions): PlanResult {
+  return solve(data, home, o, {});
+}
+
+export type SolveHooks = {
+  /** Minutes the walk may take, instead of the window minus the buffer. */
+  budget?: number;
+  /** Adjust the street pieces before planning (a replan takes off houses already visited). */
+  prepare?: (g: Graph) => void;
+  /** Where an open walk starts, as a graph node. */
+  from?: (g: Graph) => string;
+  /** Times for the schedule, when they differ from the plan's. */
+  schedule?: ScheduleOptions;
+};
+
+/** The shared steps of a plan and a replan: pocket, pieces, optimize, walk, check, schedule. */
+export function solve(data: OsmData, home: Pt, o: PlanOptions, hooks: SolveHooks): PlanResult {
   const frontageFt = o.frontageFt ?? 55;
   const pocket = findPocket(data, home, frontageFt);
   const drop = new Set(o.exclude ?? []);
   const kept = { ...pocket, pocket: pocket.pocket.filter((s) => !drop.has(s.name)) };
   const graph = buildGraph(data, kept, home, frontageFt);
+  hooks.prepare?.(graph);
   const pace = paceFor(o);
-  const budget = budgetFor(o);
-  const planner = new Planner(graph, { ...pace, budget });
+  const budget = hooks.budget ?? budgetFor(o);
+  const planner = new Planner(graph, { ...pace, budget, from: hooks.from?.(graph) });
   const { worked, minutes } = planner.optimize();
-  const segments = toSegments(planner.tour(worked));
+  const steps = planner.tour(worked);
+  const segments = toSegments(steps);
 
   const problems = checkRoute(pocket, segments, home);
   if (problems.length) return { ok: false, problems };
@@ -51,7 +71,7 @@ export function planRoute(data: OsmData, home: Pt, o: PlanOptions): PlanResult {
     plan: {
       pocket,
       segments,
-      schedule: makeSchedule(segments, o),
+      schedule: makeSchedule(segments, hooks.schedule ?? o),
       estimate: {
         minutes: Math.round(minutes),
         budget: Math.round(budget),
@@ -59,6 +79,7 @@ export function planRoute(data: OsmData, home: Pt, o: PlanOptions): PlanResult {
         housesInPocket: planner.edges.reduce((s, e) => s + planner.houses(e), 0),
       },
       skipped,
+      walked: [...new Set(steps.map((s) => s.name))],
     },
   };
 }

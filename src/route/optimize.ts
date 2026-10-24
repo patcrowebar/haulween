@@ -21,6 +21,11 @@ export type PlannerOptions = {
   /** Minutes available for the walk (window minus buffer). */
   budget: number;
   housesPerCrossing?: number;
+  /**
+   * Start the walk at this node instead of home: an open walk that still ends at home.
+   * Used to replan from where the family is. Leave it out for the usual loop from home.
+   */
+  from?: string;
 };
 
 type Mode = 'zigzag' | 'side1' | 'side2' | 'walk';
@@ -38,6 +43,8 @@ export type Step = {
 
 export type Segment = {
   name: string;
+  /** The street alone, short form ("Elm St"), without where the row goes. */
+  street: string;
   points: Pt[];
   lengthFt: number;
   housesLeft: number;
@@ -125,12 +132,15 @@ export class Planner {
   private ui: Int32Array;
   private vi: Int32Array;
   private distCache = new Map<number, Float64Array>();
+  /** Where an open walk starts (null for a loop from home). */
+  private from: string | null;
 
   constructor(graph: Graph, private o: PlannerOptions) {
     this.edges = reachableEdges(graph);
     this.home = graph.home;
     this.nodes = graph.nodes;
     this.hpc = o.housesPerCrossing ?? 2;
+    this.from = o.from && o.from !== graph.home ? o.from : null;
     for (const e of this.edges) {
       for (const n of [e.u, e.v]) {
         const list = this.adj.get(n) ?? [];
@@ -141,6 +151,7 @@ export class Planner {
     for (const n of [this.home, ...this.edges.flatMap((e) => [e.u, e.v])]) {
       if (!this.index.has(n)) { this.index.set(n, this.keys.length); this.keys.push(n); }
     }
+    if (this.from && !this.index.has(this.from)) throw new Error('Replan start is not on a safe street');
     const maxId = this.edges.reduce((m, e) => Math.max(m, e.id), 0) + 1;
     this.ui = new Int32Array(maxId);
     this.vi = new Int32Array(maxId);
@@ -210,7 +221,10 @@ export class Planner {
     const parent = new Int32Array(N).fill(-1);
     const order: number[] = [];
     const add = (n: number) => { if (parent[n] < 0) { parent[n] = n; order.push(n); } else parent[n] = n; };
-    add(this.index.get(this.home)!);
+    const h = this.index.get(this.home)!;
+    add(h);
+    const f = this.from === null ? -1 : this.index.get(this.from)!;
+    if (f >= 0) add(f);
     for (const e of W) { add(ui[e.id]); add(vi[e.id]); }
     const find = (x: number) => {
       while (parent[x] !== x) {
@@ -220,6 +234,8 @@ export class Planner {
       return x;
     };
     for (const e of W) parent[find(ui[e.id])] = find(vi[e.id]);
+    // An open walk: the start and home are joined, as if by the walk's missing last step.
+    if (f >= 0) parent[find(f)] = find(h);
     const groupOf = new Map<number, number[]>();
     const groups: number[][] = [];
     for (const n of order) {
@@ -263,6 +279,7 @@ export class Planner {
     const bump = (n: number) => { if (deg[n]++ === 0) seen.push(n); };
     for (const e of W) { bump(ui[e.id]); bump(vi[e.id]); }
     for (const e of dead) { bump(ui[e.id]); bump(vi[e.id]); }
+    if (this.from !== null) { bump(this.index.get(this.home)!); bump(this.index.get(this.from)!); }
     const odd = seen.filter((n) => deg[n] % 2);
     for (const [a, b] of this.matchNodes(odd)) {
       dead.push(...this.path(keys[a], keys[b]));
@@ -392,13 +409,18 @@ export class Planner {
     return { worked: [...W.values()], minutes: cost };
   }
 
-  /** The ordered closed walk from home, one step per piece walked. */
+  /** The ordered walk from home (or from `from`) back home, one step per piece walked. */
   tour(W: Edge[]): Step[] {
     const [, dead] = this.evaluate(W);
-    const multi: Array<[Edge, 'work' | 'dead']> = [
+    const multi: Array<[Edge, 'work' | 'dead' | 'link']> = [
       ...W.map((e) => [e, 'work'] as [Edge, 'work']),
       ...dead.map((e) => [e, 'dead'] as [Edge, 'dead']),
     ];
+    // An open walk is a loop with one made-up step from home to the start; it's cut out below.
+    if (this.from !== null) {
+      const link: Edge = { id: -1, name: '', points: [], u: this.home, v: this.from, lengthFt: 0, left: 0, right: 0, busyAt: new Map() };
+      multi.push([link, 'link']);
+    }
     const inc = new Map<string, number[]>();
     multi.forEach(([e], idx) => {
       for (const n of [e.u, e.v]) inc.set(n, [...(inc.get(n) ?? []), idx]);
@@ -427,13 +449,23 @@ export class Planner {
       }
     }
     circuit.reverse();
+    let walk = circuit;
+    const cut = circuit.findIndex(([i]) => multi[i][1] === 'link');
+    if (cut >= 0) {
+      // Rotate the loop so it starts just after the made-up step, then turn it around if that
+      // step ran the wrong way: the walk must start at `from` and end at home.
+      walk = [...circuit.slice(cut + 1), ...circuit.slice(0, cut)];
+      if (circuit[cut][1] !== this.home) {
+        walk = walk.reverse().map(([i, n]): [number, string] => [i, other(multi[i][0], n)]);
+      }
+    }
 
     // A street walked once is zigzagged; walked twice, one side each way.
     const times = new Map<number, number>();
-    for (const [i] of circuit) times.set(multi[i][0].id, (times.get(multi[i][0].id) ?? 0) + 1);
+    for (const [i] of walk) times.set(multi[i][0].id, (times.get(multi[i][0].id) ?? 0) + 1);
     const Wids = new Set(W.map((e) => e.id));
     const seen = new Map<number, number>();
-    return circuit.map(([i, n]) => {
+    return walk.map(([i, n]) => {
       const e = multi[i][0];
       const fwd = n === e.u;
       const k = seen.get(e.id) ?? 0;
@@ -487,7 +519,7 @@ export function toSegments(steps: Step[]): Segment[] {
       housesLeft: st.left, housesRight: st.right, pattern: 'walk_through', why: '',
     });
   }
-  return drafts.map(({ street: _street, mode, to, ...seg }) => {
+  return drafts.map(({ mode, to, ...seg }) => {
     if (to === 'home') seg.name += ' back home';
     else if (to) seg.name += ` to ${to}`;
     if (mode === 'zigzag') return { ...seg, pattern: 'zigzag', why: 'one pass covers both sides' };
