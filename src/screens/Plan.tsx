@@ -18,9 +18,10 @@ import { parseClock } from '../route/schedule';
 
 const FORM_KEY = 'haulween.form';
 const geocoder = new FallbackGeocoder();
-/** ?debug listens here for each street-data request. */
+/** ?debug listens here for each street-data request; the button shows progress from onProgress. */
 let onAttempt: (a: Attempt) => void = () => {};
-const overpass = new OverpassClient(undefined, undefined, { onAttempt: (a) => onAttempt(a) });
+let onProgress: (text: string) => void = () => {};
+const overpass = new OverpassClient(undefined, undefined, { onAttempt: (a) => onAttempt(a), onProgress: (t) => onProgress(t) });
 const weather = new WeatherClient();
 const planner = new Planner();
 
@@ -263,6 +264,11 @@ export default function Plan({ onNight }: { onNight: () => void }) {
     });
     if (tap === lastTap.current) setError(done.result.ok ? null : NO_ROUTE);
   }
+
+  useEffect(() => {
+    onProgress = setStep;
+    return () => { onProgress = () => {}; };
+  }, []);
 
   useEffect(() => {
     if (!debug) return;

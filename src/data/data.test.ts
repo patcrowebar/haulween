@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SessionCache } from './cache';
 import { FallbackGeocoder, NominatimGeocoder, PhotonGeocoder, Throttle } from './geocoder';
-import { OVERPASS_BACKUP_URL, OVERPASS_URL, OverpassClient, roundPoint } from './overpass';
+import { ALL_FAILED, OVERPASS_SERVERS, OverpassClient, RETIRED_SERVER, roundPoint } from './overpass';
+
+const [FIRST, SECOND] = OVERPASS_SERVERS;
+/** A client with no real pauses between tries. */
+const quick = (fetchFn: unknown) =>
+  new OverpassClient(fetchFn as typeof fetch, new SessionCache('t.', null), { sleep: async () => {}, isOnline: () => true });
 import { WeatherClient, addMinutes, flagsFor } from './weather';
 import { PLACEHOLDER_ADDRESS } from '../config';
 
@@ -14,7 +19,7 @@ describe('Overpass client', () => {
     const fetchFn = vi.fn(() => json({ elements: [] }));
     await new OverpassClient(fetchFn, new SessionCache('t.', null)).streetsNear(41.8000824, -82.1003685);
     const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('https://overpass-api.de/api/interpreter');
+    expect(url).toBe(FIRST);
     expect(init.method).toBe('POST');
     const query = decodeURIComponent(String(init.body).slice(5));
     expect(query).toContain('around:900,41.8,-82.1)');
@@ -30,39 +35,57 @@ describe('Overpass client', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
-  it('explains a busy server in plain words', async () => {
-    const c = new OverpassClient(() => json({}, 429), new SessionCache('t.', null));
-    await expect(c.streetsNear(41.8, -82.1)).rejects.toThrow('The street map service is busy. Wait a minute and try again.');
+  it('says "busy" when every server says so', async () => {
+    const c = quick(() => json({}, 429));
+    await expect(c.streetsNear(41.8, -82.1)).rejects.toThrow('The street map servers are busy right now. Try again in a few minutes.');
   });
 
   const urls = (f: ReturnType<typeof vi.fn>) => f.mock.calls.map((c) => (c as unknown as [string])[0]);
 
-  it('never touches the backup when the main server answers', async () => {
+  it('never touches the next server when the first answers', async () => {
     const fetchFn = vi.fn(() => json({ elements: [] }));
-    await new OverpassClient(fetchFn, new SessionCache('t.', null)).streetsNear(41.8, -82.1);
-    expect(urls(fetchFn)).toEqual([OVERPASS_URL]);
+    await quick(fetchFn).streetsNear(41.8, -82.1);
+    expect(urls(fetchFn)).toEqual([FIRST]);
   });
 
-  it.each([429, 504, 500])('asks the backup once when the main server answers %i', async (status) => {
-    const fetchFn = vi.fn((url: string) => (url === OVERPASS_URL ? json({}, status) : json({ elements: [] })));
-    const data = await new OverpassClient(fetchFn as unknown as typeof fetch, new SessionCache('t.', null)).streetsNear(41.8, -82.1);
+  it('never asks overpass-api.de, whose operator asks apps like this one not to', async () => {
+    const fetchFn = vi.fn(() => json({}, 500));
+    await quick(fetchFn).streetsNear(41.8, -82.1).catch(() => {});
+    expect(urls(fetchFn)).not.toContain(RETIRED_SERVER);
+    expect(OVERPASS_SERVERS).not.toContain(RETIRED_SERVER);
+  });
+
+  it('keeps identifying the site to the servers (no hiding the Referer)', async () => {
+    const fetchFn = vi.fn(() => json({ elements: [] }));
+    await quick(fetchFn).streetsNear(41.8, -82.1);
+    const [, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.referrerPolicy).not.toBe('no-referrer');
+    expect(init.headers).toEqual({ 'Content-Type': 'application/x-www-form-urlencoded' });
+  });
+
+  it.each([
+    [429, [FIRST, SECOND]], // asked to slow down: no quick retry
+    [504, [FIRST, FIRST, SECOND]],
+    [500, [FIRST, FIRST, SECOND]],
+  ])('after a quick %i, moves on as it should', async (status, expected) => {
+    const fetchFn = vi.fn((url: string) => (url === FIRST ? json({}, status) : json({ elements: [] })));
+    const data = await quick(fetchFn).streetsNear(41.8, -82.1);
     expect(data.streets).toEqual([]);
-    expect(urls(fetchFn)).toEqual([OVERPASS_URL, OVERPASS_BACKUP_URL]);
-    const [, init] = fetchFn.mock.calls[1] as unknown as [string, RequestInit];
+    expect(urls(fetchFn)).toEqual(expected);
+    const [, init] = fetchFn.mock.calls[fetchFn.mock.calls.length - 1] as unknown as [string, RequestInit];
     expect(decodeURIComponent(String(init.body))).toContain('around:900,41.8,-82.1)'); // still rounded
   });
 
-  it('asks the backup when the main server is unreachable', async () => {
-    const fetchFn = vi.fn((url: string) => (url === OVERPASS_URL ? Promise.reject(new TypeError('offline')) : json({ elements: [] })));
-    await new OverpassClient(fetchFn as unknown as typeof fetch, new SessionCache('t.', null)).streetsNear(41.8, -82.1);
-    expect(urls(fetchFn)).toEqual([OVERPASS_URL, OVERPASS_BACKUP_URL]);
+  it('retries a server that got no answer at all, then tries the next', async () => {
+    const fetchFn = vi.fn((url: string) => (url === FIRST ? Promise.reject(new TypeError('Load failed')) : json({ elements: [] })));
+    await quick(fetchFn).streetsNear(41.8, -82.1);
+    expect(urls(fetchFn)).toEqual([FIRST, FIRST, SECOND]);
   });
 
-  it('gives up after the backup, saying the service is busy when one of them said so', async () => {
-    const fetchFn = vi.fn((url: string) => json({}, url === OVERPASS_URL ? 500 : 429));
-    const c = new OverpassClient(fetchFn as unknown as typeof fetch, new SessionCache('t.', null));
-    await expect(c.streetsNear(41.8, -82.1)).rejects.toThrow('The street map service is busy. Wait a minute and try again.');
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+  it('when every server fails, says to try again in a few minutes', async () => {
+    const fetchFn = vi.fn((url: string) => json({}, url === FIRST ? 500 : 429));
+    await expect(quick(fetchFn).streetsNear(41.8, -82.1)).rejects.toThrow(ALL_FAILED);
+    expect(ALL_FAILED).toMatch(/try again in a few minutes/i);
   });
 });
 

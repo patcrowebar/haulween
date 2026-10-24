@@ -14,7 +14,7 @@ Built in public. Fork it and run it for your own neighborhood.
 - **Your route is saved as soon as it's planned.** It stays in your browser, with the street data it needs, when you close the browser or the phone restarts. Next time you open Haulween, the route is there with "Start the night" ready, and no street data is fetched again. Planning the night before just works. (Private browsing windows forget it when they close.)
 - **Pressing "Start the night" early is fine.** Until your start time, the bar says when you start, and nothing is tracked unless you set off along the route.
 - **Open Night Mode before you head out.** Once it's open, the bar, checking off streets and "Replan from here" keep working if you lose signal. Opening the page needs a connection, and so does the map's background.
-- **If you see "The street map service is busy,"** wait a minute and try again, or switch from Wi-Fi to cellular. Overpass limits each internet connection, so a whole household shares one limit.
+- **If the street map doesn't come,** try again in a few minutes. Haulween asks the free public map servers one at a time, and they're all busy on Halloween afternoon. Add `?debug` to the address to see what each one said.
 
 ## Run it
 
@@ -33,7 +33,7 @@ Phones only allow GPS on `https`, so test Night Mode on the deployed site.
 
 ## How it works
 
-- Streets come from OpenStreetMap through the Overpass API. Only your home point, rounded to about 100 m, is sent.
+- Streets come from OpenStreetMap through free public Overpass servers (VK Maps, then Private.coffee). Only your home point, rounded to about 100 m, is sent.
 - Address lookup uses Nominatim, and only when you press Search.
 - Weather and sunset come from Open-Meteo.
 - Jack, the AI guide, is optional and uses your own Claude API key, kept only in your browser.

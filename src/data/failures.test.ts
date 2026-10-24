@@ -2,7 +2,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SessionCache } from './cache';
 import { FallbackGeocoder, NominatimGeocoder, PhotonGeocoder, Throttle } from './geocoder';
-import { MESSAGES, OVERPASS_BACKUP_URL, OVERPASS_URL, OverpassClient, errorText, type Attempt } from './overpass';
+import {
+  ALL_FAILED, OVERPASS_SERVERS, OVERPASS_TIMEOUT_MS, OVERPASS_TOTAL_MS, OverpassClient, RETIRED_SERVER, errorText, type Attempt,
+} from './overpass';
 import { WeatherClient } from './weather';
 import { PLACEHOLDER_ADDRESS } from '../config';
 
@@ -30,114 +32,160 @@ function fakeNet(script: (url: string) => Answer) {
 }
 
 const OK = { body: JSON.stringify({ elements: [] }) };
-const client = (net: ReturnType<typeof fakeNet>, online = true) =>
-  new OverpassClient(net.fetch, new SessionCache('t.', null), { timeoutMs: 30, isOnline: () => online });
+const A = 'https://a.test/api/interpreter';
+const B = 'https://b.test/api/interpreter';
+const C = 'https://c.test/api/interpreter';
 
-describe('Overpass time limits', () => {
-  it('stops waiting for a server that never answers and asks the backup once', async () => {
-    const net = fakeNet((u) => (u === OVERPASS_URL ? 'hang' : OK));
-    await expect(client(net).streetsNear(41.8, -82.1)).resolves.toEqual({ streets: [], areas: [], sidewalks: [] });
-    expect(net.calls.map((c) => c.url)).toEqual([OVERPASS_URL, OVERPASS_BACKUP_URL]);
-    expect(net.calls[0].aborted()).toBe(true); // the stuck request was cancelled
+/** Fake servers A, B, C; tiny time limits; no real pauses. */
+function client(net: ReturnType<typeof fakeNet>, o: { online?: boolean; servers?: string[]; timeoutMs?: number; totalMs?: number } = {}) {
+  const progress: string[] = [];
+  const attempts: Attempt[] = [];
+  const c = new OverpassClient(net.fetch, new SessionCache('t.', null), {
+    servers: o.servers ?? [A, B], timeoutMs: o.timeoutMs ?? 30, totalMs: o.totalMs ?? 5_000,
+    isOnline: () => o.online ?? true, sleep: async () => {}, onProgress: (t) => progress.push(t), onAttempt: (a) => attempts.push(a),
+  });
+  return { c, progress, attempts };
+}
+const hosts = (net: ReturnType<typeof fakeNet>) => net.calls.map((x) => new URL(x.url).host[0]);
+
+describe('the request overpass-api.de refused', () => {
+  it("isn't sent there at all", () => {
+    expect(OVERPASS_SERVERS).not.toContain(RETIRED_SERVER);
   });
 
-  it('counts a body that never finishes as a timeout too', async () => {
-    const net = fakeNet((u) => (u === OVERPASS_URL ? 'slow-body' : OK));
-    await expect(client(net).streetsNear(41.8, -82.1)).resolves.toBeTruthy();
-    expect(net.calls).toHaveLength(2);
+  it('a 406 refusal is never retried; the next server is asked', async () => {
+    // overpass-api.de answered this site's exact request with 406 Not Acceptable, in 0.4 s.
+    const net = fakeNet((u) => (u === A ? { status: 406, body: '<html>406 Not Acceptable</html>' } : OK));
+    const { c } = client(net);
+    await expect(c.streetsNear(41.8, -82.1)).resolves.toBeTruthy();
+    expect(hosts(net)).toEqual(['a', 'b']);
   });
 
-  it('says so plainly when both servers time out', async () => {
+  it('a refusal the browser hides (no CORS headers: "Failed to fetch") is retried once, then the next', async () => {
+    const net = fakeNet((u) => (u === A ? 'offline' : OK)); // fetch rejects with a TypeError
+    const { c, attempts } = client(net);
+    await c.streetsNear(41.8, -82.1);
+    expect(hosts(net)).toEqual(['a', 'a', 'b']);
+    expect(attempts.map((a) => a.outcome)).toEqual(['unreachable', 'unreachable', 'ok']);
+  });
+});
+
+describe('when map servers fail', () => {
+  it('the first fails fast, then works on the retry', async () => {
+    let n = 0;
+    const net = fakeNet((u) => (u === A && n++ === 0 ? { status: 502, body: 'Gateway Timeout' } : OK));
+    const { c, progress } = client(net);
+    await expect(c.streetsNear(41.8, -82.1)).resolves.toBeTruthy();
+    expect(hosts(net)).toEqual(['a', 'a']);
+    expect(progress).toEqual(['Trying that map server again…']);
+  });
+
+  it('the first fails, the second hangs, the third works', async () => {
+    const net = fakeNet((u) => (u === A ? { status: 502, body: 'x' } : u === B ? 'hang' : OK));
+    const { c, progress, attempts } = client(net, { servers: [A, B, C] });
+    await expect(c.streetsNear(41.8, -82.1)).resolves.toBeTruthy();
+    expect(hosts(net)).toEqual(['a', 'a', 'b', 'c']); // a hang isn't a quick failure: no retry
+    expect(net.calls[2].aborted()).toBe(true); // the stuck request was cancelled
+    expect(progress).toEqual(['Trying that map server again…', 'Trying another map server…', 'Trying another map server…']);
+    expect(attempts.map((a) => a.outcome)).toEqual(['down', 'down', 'timeout', 'ok']);
+  });
+
+  it('everything fails: plain words to try again in a few minutes', async () => {
+    const net = fakeNet((u) => (u === A ? { status: 502, body: 'x' } : u === B ? 'hang' : 'offline'));
+    const { c } = client(net, { servers: [A, B, C] });
+    await expect(c.streetsNear(41.8, -82.1)).rejects.toThrow(ALL_FAILED);
+  });
+
+  it('never asks two servers at once', async () => {
+    let inFlight = 0, most = 0;
     const net = fakeNet(() => 'hang');
-    await expect(client(net).streetsNear(41.8, -82.1)).rejects.toThrow(MESSAGES.timeout);
-    expect(net.calls).toHaveLength(2);
+    const tracked = vi.fn((url: string, init?: RequestInit): Promise<Response> => {
+      inFlight++;
+      most = Math.max(most, inFlight);
+      return net.fetch(url, init).finally(() => { inFlight--; });
+    });
+    const c = new OverpassClient(tracked as unknown as typeof fetch, new SessionCache('t.', null), {
+      servers: [A, B, C], timeoutMs: 20, totalMs: 1_000, sleep: async () => {}, isOnline: () => true,
+    });
+    await c.streetsNear(41.8, -82.1).catch(() => {});
+    expect(most).toBe(1);
   });
 
-  it('uses a 20 second limit by default', async () => {
+  it('stops after the total time limit, however many servers are left', async () => {
+    const net = fakeNet(() => 'hang');
+    const { c } = client(net, { servers: [A, B, C], timeoutMs: 40, totalMs: 60 });
+    const t0 = Date.now();
+    await expect(c.streetsNear(41.8, -82.1)).rejects.toThrow(ALL_FAILED);
+    expect(Date.now() - t0).toBeLessThan(200);
+    expect(net.calls.length).toBeLessThanOrEqual(2);
+  });
+
+  it('uses 25 s per server and 45 s in all by default', async () => {
+    expect(OVERPASS_TIMEOUT_MS).toBe(25_000);
+    expect(OVERPASS_TOTAL_MS).toBe(45_000);
     vi.useFakeTimers();
     try {
       const net = fakeNet(() => 'hang');
       const c = new OverpassClient(net.fetch, new SessionCache('t.', null), { isOnline: () => true });
       const done = c.streetsNear(41.8, -82.1).catch((e: Error) => e.message);
-      await vi.advanceTimersByTimeAsync(19_999);
+      await vi.advanceTimersByTimeAsync(24_999);
       expect(net.calls).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(1);
-      expect(net.calls).toHaveLength(2); // main gave up at 20 s; backup started
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(await done).toBe(MESSAGES.timeout);
+      expect(net.calls).toHaveLength(2); // first gave up at 25 s; the next started
+      await vi.advanceTimersByTimeAsync(20_000); // the second gets only what's left of 45 s
+      expect(await done).toBe(ALL_FAILED);
     } finally {
       vi.useRealTimers();
     }
   });
+
+  it('counts a body that never finishes as a time-out too', async () => {
+    const net = fakeNet((u) => (u === A ? 'slow-body' : OK));
+    await expect(client(net).c.streetsNear(41.8, -82.1)).resolves.toBeTruthy();
+    expect(hosts(net)).toEqual(['a', 'b']);
+  });
 });
 
 describe('Overpass failures, each with its own words', () => {
-  const BUSY = 'The street map service is busy. Wait a minute and try again.';
-  /** The plain-text page overpass-api.de sends with a 502 (shortened), as WebKit got it. */
-  const GATEWAY_PAGE = '# 502 Gateway Timeout\n\nThis Overpass API server is currently overloaded. The dispatcher gave up. runtime error.';
+  const BUSY = 'The street map servers are busy right now. Try again in a few minutes.';
 
-  it.each([['429', 429], ['504', 504]] as Array<[string, Answer]>)('says "busy" only for a real %s, after trying the backup', async (_, answer) => {
-    const net = fakeNet(() => answer);
-    await expect(client(net).streetsNear(41.8, -82.1)).rejects.toThrow(BUSY);
-    expect(net.calls.map((c) => c.url)).toEqual([OVERPASS_URL, OVERPASS_BACKUP_URL]);
-  });
-
-  it('what Safari hit: a 502 error page, then a backup that never answers, is not "busy"', async () => {
-    // Before, the page's words ("dispatcher", "runtime error") made this "busy", and "busy"
-    // outranked the backup's time-out, so Safari always said the service was busy.
-    const net = fakeNet((u) => (u === OVERPASS_URL ? { status: 502, body: GATEWAY_PAGE } : 'hang'));
-    const err = await client(net).streetsNear(41.8, -82.1).catch((e: Error) => e);
-    expect((err as Error).message).toBe(MESSAGES.down);
-    expect((err as Error).message).not.toBe(BUSY);
+  it.each([['429', 429], ['504', 504]] as Array<[string, Answer]>)('says "busy" only when every server sent a real %s', async (_, answer) => {
+    await expect(client(fakeNet(() => answer)).c.streetsNear(41.8, -82.1)).rejects.toThrow(BUSY);
   });
 
   it.each([
-    ['a 502 error page', { status: 502, body: GATEWAY_PAGE }],
+    ['a 502 error page', { status: 502, body: '# 502 Gateway Timeout. The dispatcher gave up. runtime error.' }],
     ['a 503', 503],
     ['a 200 with an HTML error page', { status: 200, body: '<html><p>rate_limited</p></html>' }],
     ['a JSON answer that stopped early', { body: JSON.stringify({ elements: [], remark: 'runtime error: Query timed out in "query" at line 3 after 61 seconds.' }) }],
-  ] as Array<[string, Answer]>)('calls %s "having trouble", not busy', async (_, answer) => {
-    await expect(client(fakeNet(() => answer)).streetsNear(41.8, -82.1)).rejects.toThrow(MESSAGES.down);
+    ['no answer at all', 'offline'],
+  ] as Array<[string, Answer]>)('never calls %s "busy"', async (_, answer) => {
+    const err = await client(fakeNet(() => answer)).c.streetsNear(41.8, -82.1).catch((e: Error) => e);
+    expect((err as Error).message).toBe(ALL_FAILED);
   });
 
-  it('says a request that got no answer at all ("Load failed") is unanswered, not busy', async () => {
-    const net = fakeNet(() => 'offline'); // fetch rejects with a TypeError, as Safari and Chrome do
-    await expect(client(net, true).streetsNear(41.8, -82.1)).rejects.toThrow(MESSAGES.unreachable);
-  });
-
-  it('says "check your connection" only when the device is offline', async () => {
-    await expect(client(fakeNet(() => 'offline'), false).streetsNear(41.8, -82.1))
+  it('says "check your connection" when the device is offline, without trying the rest', async () => {
+    const net = fakeNet(() => 'offline');
+    await expect(client(net, { online: false }).c.streetsNear(41.8, -82.1))
       .rejects.toThrow("Couldn't reach the street map. Check your connection and try again.");
-  });
-
-  it('falls back to the backup when the main one is busy', async () => {
-    const net = fakeNet((u) => (u === OVERPASS_URL ? 429 : OK));
-    await expect(client(net).streetsNear(41.8, -82.1)).resolves.toBeTruthy();
-  });
-
-  it('a real "busy" from one server still wins over a time-out from the other', async () => {
-    const net = fakeNet((u) => (u === OVERPASS_URL ? 'hang' : 429));
-    await expect(client(net).streetsNear(41.8, -82.1)).rejects.toThrow(BUSY);
+    expect(net.calls).toHaveLength(1);
   });
 });
 
 describe('?debug: what each street-data request did', () => {
   it('reports the server, status, time and error type, with no query or coordinates', async () => {
-    const attempts: Attempt[] = [];
-    const net = fakeNet((u) => (u === OVERPASS_URL ? { status: 502, body: 'x' } : 'offline'));
-    const c = new OverpassClient(net.fetch, new SessionCache('t.', null), { timeoutMs: 30, isOnline: () => true, onAttempt: (a) => attempts.push(a) });
+    const net = fakeNet((u) => (u === A ? { status: 502, body: 'x' } : 'offline'));
+    const { c, attempts } = client(net);
     await c.streetsNear(41.8, -82.1).catch(() => {});
-    expect(attempts).toEqual([
-      { server: 'overpass-api.de', status: 502, ms: expect.any(Number), outcome: 'down', error: null, bytes: 1 },
-      { server: 'overpass.private.coffee', status: null, ms: expect.any(Number), outcome: 'unreachable', error: 'TypeError: Failed to fetch', bytes: null },
-    ]);
+    expect(attempts[0]).toEqual({ server: 'a.test', status: 502, ms: expect.any(Number), outcome: 'down', error: null, bytes: 1 });
+    expect(attempts[2]).toEqual({ server: 'b.test', status: null, ms: expect.any(Number), outcome: 'unreachable', error: 'TypeError: Failed to fetch', bytes: null });
     expect(JSON.stringify(attempts)).not.toMatch(/41\.8|82\.1|around/);
   });
 
   it('reports a time-out as a TimeoutError', async () => {
-    const attempts: Attempt[] = [];
-    const net = fakeNet((u) => (u === OVERPASS_URL ? 'hang' : OK));
-    await new OverpassClient(net.fetch, new SessionCache('t.', null), { timeoutMs: 30, onAttempt: (a) => attempts.push(a) }).streetsNear(41.8, -82.1);
+    const net = fakeNet((u) => (u === A ? 'hang' : OK));
+    const { c, attempts } = client(net);
+    await c.streetsNear(41.8, -82.1);
     expect(attempts.map((a) => [a.outcome, a.error])).toEqual([['timeout', 'TimeoutError'], ['ok', null]]);
   });
 
