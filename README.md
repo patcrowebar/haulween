@@ -8,6 +8,13 @@ Built in public. Fork it and run it for your own neighborhood.
 
 **Live site:** https://haulween.vercel.app (deploys from `main`)
 
+## Plan ahead
+
+- **Plan the night before, or early on Halloween.** Haulween gets its street data from OpenStreetMap's free Overpass service. Everyone shares it, and it gets busy on Halloween afternoon.
+- **Press "Start the night" once your route looks right.** That saves the plan in your browser, along with the street data it needs. It stays there when you close the browser or the phone restarts, until you press "End the night" or start a new night. Next time you open Haulween, tap "Back to Night Mode". (Private browsing windows forget it when they close.)
+- **Night Mode works from that saved plan.** The map, checking off streets and "Replan from here" never fetch street data again. You still need a connection to open the page, and the map's background comes from the internet, so open Night Mode before you head out.
+- **If you see "The street map service is busy,"** wait a minute and try again, or switch from Wi-Fi to cellular. Overpass limits each internet connection, so a whole household shares one limit.
+
 ## Run it
 
 Needs Node 24 or newer (see `.nvmrc`).
