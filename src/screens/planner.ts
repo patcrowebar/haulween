@@ -3,6 +3,7 @@
 // Nothing here can hang: a worker that fails to load or crashes hands its plans to the main
 // thread once, and every plan has a time limit. Failures come back as plain-words errors.
 
+import { ServiceError } from '../data/cache';
 import type { Here, ReplanOptions, ReplanResult, Visited } from '../route/replan';
 import type { OsmData, Pt } from '../route/types';
 import type { PlanRequest } from './plan.worker';
@@ -12,7 +13,20 @@ type Reply = { id: number; ok: true; value: unknown } | { id: number; ok: false;
 type Waiting = { job: Job; resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
 
 export const PLAN_TIMEOUT_MS = 90_000;
-export const PLAN_FAILED = "Something went wrong while planning. Try again, or try a nearby address.";
+export const PLAN_FAILED = 'Something went wrong planning that. Try again.';
+
+/** An error whose message was written for a parent, so it's safe to show. */
+export class PlainError extends Error {}
+
+export const isCancelled = (e: unknown) => e instanceof Error && e.message === 'cancelled';
+
+/**
+ * The words to show for any failure. Only messages written for a parent (service failures and
+ * planning errors) are shown as they are; a raw JavaScript error never reaches the screen.
+ */
+export function plainMessage(e: unknown): string {
+  return e instanceof ServiceError || e instanceof PlainError ? e.message : PLAN_FAILED;
+}
 const KNOWN: Record<string, string> = {
   'No streets near home': "We couldn't find any streets near that address. Check it and try again.",
   'No safe streets to walk': "We couldn't find a street near home that's safe to walk. Check the address.",
@@ -46,7 +60,7 @@ export class Planner {
       const w = this.take(e.data.id);
       if (!w) return;
       if (e.data.ok) w.resolve(e.data.value);
-      else w.reject(new Error(friendlyPlanError(e.data.error)));
+      else w.reject(new PlainError(friendlyPlanError(e.data.error)));
     };
     // The worker failed to load, crashed, or sent something unreadable: plan on the main thread.
     this.worker.onerror = (e) => {
@@ -95,7 +109,7 @@ export class Planner {
         // Restart the worker so a stuck plan doesn't hold up the next one.
         this.worker?.terminate();
         this.worker = null;
-        reject(new Error('Planning took too long. Try a shorter time window, then try again.'));
+        reject(new PlainError('Planning took too long. Try a shorter time window, then try again.'));
       }, this.timeoutMs);
       this.waiting.set(id, { job, resolve, reject, timer });
       try {
@@ -121,7 +135,7 @@ function inline(job: Job): Promise<unknown> {
       try {
         resolve(runJob(job));
       } catch (e) {
-        reject(new Error(friendlyPlanError(e instanceof Error ? e.message : '')));
+        reject(new PlainError(friendlyPlanError(e instanceof Error ? e.message : '')));
       }
     }, 0); // let "Planning your route…" paint first
   });

@@ -1,6 +1,7 @@
 // Address lookup. The street address goes to the geocoder and nowhere else.
 // Nominatim first; if it fails or pushes back, Photon. Both are behind the same interface.
 
+import { isNum, withDefaults } from '../stored';
 import { RequestError, SessionCache, TimeoutError, browserIsOnline, fetchTextWithin, type FailKind } from './cache';
 
 type Fetch = typeof fetch;
@@ -47,6 +48,19 @@ export type Place = {
   /** Who found it, for the credit line. */
   source: 'Nominatim' | 'Photon';
 };
+
+/**
+ * A place read back from the cache, which an older version may have written. Versions before
+ * road and town kept one `label` ("Elm Street, Lakeview"); its street is kept, but not its town,
+ * which could be a small local area name. null if there's no usable point.
+ */
+export function toPlace(saved: unknown): Place | null {
+  const p = withDefaults(saved, { lat: NaN, lng: NaN, road: '', town: '', source: 'Nominatim' as Place['source'], label: '' });
+  if (!isNum(p.lat) || !isNum(p.lng)) return null;
+  const parts = p.label.split(',').map((s) => s.trim());
+  const road = p.road || (parts.length >= 2 ? parts[0] : '');
+  return { lat: p.lat, lng: p.lng, road, town: p.town, source: p.source === 'Photon' ? 'Photon' : 'Nominatim' };
+}
 
 export interface Geocoder {
   readonly name: Place['source'];
@@ -125,11 +139,15 @@ export class PhotonGeocoder implements Geocoder {
 
 /** Tries each geocoder in turn when one fails, and caches what it finds. */
 export class FallbackGeocoder {
-  private cache = new SessionCache<Place | null>('haulween.geo.');
+  private cache = new SessionCache<unknown>('haulween.geo.');
   /** The geocoder that answered last, for the credit line. */
   current: Geocoder;
 
-  constructor(private geocoders: Geocoder[] = [new NominatimGeocoder(), new PhotonGeocoder()]) {
+  constructor(
+    private geocoders: Geocoder[] = [new NominatimGeocoder(), new PhotonGeocoder()],
+    storage?: Storage | null,
+  ) {
+    if (storage !== undefined) this.cache = new SessionCache<unknown>('haulween.geo.', storage);
     this.current = geocoders[0];
   }
 
@@ -137,7 +155,9 @@ export class FallbackGeocoder {
     const key = address.trim().toLowerCase().replace(/\s+/g, ' ');
     if (!key) return null;
     const hit = this.cache.get(key);
-    if (hit !== undefined) return hit;
+    if (hit === null) return null; // looked up before: not found
+    const cached = hit === undefined ? null : toPlace(hit);
+    if (cached) return cached;
     const kinds: FailKind[] = [];
     for (const g of this.geocoders) {
       try {

@@ -11,7 +11,7 @@ import {
   forgetNight, freshProgress, loadNight, loadNightData, loadProgress, minutesOn, saveNight, saveProgress,
   type NightPlan, type NightProgress,
 } from './nightStore';
-import { Planner } from './planner';
+import { Planner, isCancelled, plainMessage } from './planner';
 import { patternText } from './planning';
 
 const RouteMap = lazy(() => import('../map/RouteMap'));
@@ -59,7 +59,7 @@ function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: Nig
   const n = segments.length;
   const tl = useMemo(() => timeline(schedule, plan.start), [schedule, plan.start]);
 
-  const [progress, setProgressState] = useState<NightProgress>(() => loadProgress(n) ?? freshProgress(plan, false));
+  const [progress, setProgressState] = useState<NightProgress>(() => loadProgress(plan) ?? freshProgress(plan, false));
   const progressRef = useRef(progress);
   const setProgress = useCallback((p: NightProgress) => {
     progressRef.current = p;
@@ -269,7 +269,7 @@ function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: Nig
       progressRef.current = fresh;
       onPlan(next);
     } catch (e) {
-      setNote(e instanceof Error && e.message !== 'cancelled' ? e.message : 'Replanning stopped. Try again.');
+      setNote(isCancelled(e) ? 'Replanning stopped. Try again.' : plainMessage(e));
     } finally {
       setReplanning(false);
     }

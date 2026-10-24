@@ -6,6 +6,7 @@ import { shortName } from '../route/geo';
 import { planRoute, type PlanResult } from '../route/plan';
 import { replanFromHere, type Here, type ReplanOptions, type ReplanResult, type Visited } from '../route/replan';
 import { findPocket } from '../route/pocket';
+import { withDefaults } from '../stored';
 import type { OsmData, Pt } from '../route/types';
 
 export type PlanForm = {
@@ -35,6 +36,13 @@ export const DEFAULT_FORM: PlanForm = {
   avoid: '',
   doorSeconds: DEFAULT_DOOR_SECONDS,
 };
+
+/** A form saved by any version of the app, with defaults for anything missing or unreadable. */
+export function toForm(saved: unknown): PlanForm {
+  const f = withDefaults(saved, DEFAULT_FORM);
+  return DOOR_SECONDS_CHOICES.includes(f.doorSeconds as (typeof DOOR_SECONDS_CHOICES)[number])
+    ? f : { ...f, doorSeconds: DEFAULT_DOOR_SECONDS };
+}
 
 /** "4, 7 and 10" -> [4, 7, 10]. Only whole ages from 1 to 99. */
 export function parseAges(text: string): number[] {

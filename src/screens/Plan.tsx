@@ -2,16 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { DOOR_SECONDS_CHOICES, PLACEHOLDER_ADDRESS } from '../config';
-import { ServiceError } from '../data/cache';
 import { FallbackGeocoder, type Place } from '../data/geocoder';
 import { OverpassClient } from '../data/overpass';
 import { WeatherClient, type Tonight } from '../data/weather';
 import type { OsmData, Pt } from '../route/types';
 import Results from './Results';
 import { freshProgress, loadNight, saveNight, type NightPlan } from './nightStore';
-import { PLAN_FAILED, Planner } from './planner';
+import { Planner, isCancelled, plainMessage } from './planner';
 import {
-  DEFAULT_FORM, asksDoorTime, doorEstimate, doorSecondsFor, routeTitle, youngestAge, type PlanForm, type PlanOnce,
+  DEFAULT_FORM, asksDoorTime, doorEstimate, doorSecondsFor, routeTitle, toForm, youngestAge, type PlanForm, type PlanOnce,
   type PlanOutcome,
 } from './planning';
 import { parseClock } from '../route/schedule';
@@ -28,7 +27,7 @@ type Found = { home: Pt; title: string; data: OsmData; demo: boolean };
 function loadForm(): PlanForm {
   try {
     const saved = localStorage.getItem(FORM_KEY);
-    if (saved) return { ...DEFAULT_FORM, ...(JSON.parse(saved) as Partial<PlanForm>) };
+    if (saved) return toForm(JSON.parse(saved));
   } catch {
     // no storage: start fresh
   }
@@ -139,8 +138,8 @@ export default function Plan({ onNight }: { onNight: () => void }) {
       setStatus('done');
       requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ block: 'start' }));
     } catch (e) {
-      if (e instanceof Error && e.message === 'cancelled') return;
-      setError(e instanceof ServiceError || e instanceof Error ? e.message : 'Something went wrong. Try again.');
+      if (isCancelled(e)) return;
+      setError(plainMessage(e));
       setStatus(found ? 'done' : 'idle');
     } finally {
       setStep('');
@@ -179,7 +178,7 @@ export default function Plan({ onNight }: { onNight: () => void }) {
       setPendingDoor(seconds);
       let failed: string | null = null;
       p = await planner.run(found.data, found.home, f, seconds).catch((e: unknown) => {
-        failed = e instanceof Error ? e.message : PLAN_FAILED;
+        failed = isCancelled(e) ? 'cancelled' : plainMessage(e);
         return undefined;
       });
       if (tap === lastTap.current) setPendingDoor(null);

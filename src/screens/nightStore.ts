@@ -5,9 +5,10 @@
 
 import type { Segment } from '../route/optimize';
 import type { PlanOptions } from '../route/plan';
-import type { Schedule } from '../route/schedule';
+import { fmt24, type Schedule } from '../route/schedule';
 import { startTrack, type Track } from '../route/track';
 import type { NamedLine, OsmData, Pt } from '../route/types';
+import { isNum, withDefaults } from '../stored';
 
 const PLAN_KEY = 'haulween.night.plan';
 const DATA_KEY = 'haulween.night.data';
@@ -59,15 +60,48 @@ function write(k: string, v: unknown): boolean {
   }
 }
 
-export const loadNight = (): NightPlan | null => {
-  const p = read<NightPlan>(PLAN_KEY);
-  return p && p.v === 1 && Array.isArray(p.segments) ? p : null;
+/**
+ * A saved plan, from any version of the app. The route itself (its streets, schedule, home and
+ * start) can't be made up, so without those there's no plan; everything else gets a default.
+ */
+export function toNightPlan(saved: unknown): NightPlan | null {
+  const p = withDefaults(saved, {
+    v: 1, title: 'Your route', demo: false, date: '', home: [] as unknown as Pt, start: NaN,
+    segments: [] as Segment[], schedule: null as unknown as Schedule, options: {} as PlanOptions,
+    lines: { streetLines: [], busyRoads: [], areas: [] } as NightPlan['lines'],
+  });
+  const s = (saved ?? {}) as { schedule?: unknown };
+  const schedule = typeof s.schedule === 'object' && s.schedule !== null ? (s.schedule as Schedule) : null;
+  if (!p.segments.length || !schedule || !Array.isArray(schedule.rows) || schedule.rows.length !== p.segments.length
+    || p.home.length !== 2 || !isNum(p.start) || !/^\d{4}-\d{2}-\d{2}$/.test(p.date)) return null;
+  const options = withDefaults(p.options, {
+    startTime: fmt24(p.start), endTime: typeof schedule.windowEnd24 === 'string' ? schedule.windowEnd24 : '20:00',
+    youngestAge: 8, stroller: false, doorSeconds: 60, exclude: [] as string[],
+  });
+  const lines = withDefaults(p.lines, { streetLines: [] as NamedLine[], busyRoads: [] as NamedLine[], areas: [] as NamedLine[] });
+  return { ...p, v: 1, schedule, options, lines };
+}
+
+/** Saved progress, from any version of the app; null if it doesn't fit this plan. */
+export function toProgress(saved: unknown, plan: NightPlan): NightProgress | null {
+  const fresh = freshProgress(plan, false);
+  const p = withDefaults(saved, { ...fresh, demoClock: plan.demo ? plan.start : (null as number | null) });
+  const t = withDefaults(p.track, fresh.track);
+  if (t.done.length !== plan.segments.length || !isNum(t.current)) return null;
+  return {
+    ...p,
+    track: { ...t, current: Math.max(0, Math.min(t.current, t.done.length)) },
+    earlier: withDefaults(p.earlier, fresh.earlier),
+    demoClock: plan.demo ? (isNum(p.demoClock) ? p.demoClock : plan.start) : null,
+  };
+}
+
+export const loadNight = (): NightPlan | null => toNightPlan(read<unknown>(PLAN_KEY));
+export const loadNightData = (): OsmData | null => {
+  const d = withDefaults(read<unknown>(DATA_KEY), { streets: [] as OsmData['streets'], areas: [] as OsmData['areas'], sidewalks: [] as OsmData['sidewalks'] });
+  return d.streets.length ? d : null;
 };
-export const loadNightData = (): OsmData | null => read<OsmData>(DATA_KEY);
-export const loadProgress = (rows: number): NightProgress | null => {
-  const p = read<NightProgress>(PROGRESS_KEY);
-  return p && p.track?.done?.length === rows ? p : null;
-};
+export const loadProgress = (plan: NightPlan): NightProgress | null => toProgress(read<unknown>(PROGRESS_KEY), plan);
 export const saveProgress = (p: NightProgress): boolean => write(PROGRESS_KEY, p);
 
 export const freshProgress = (plan: NightPlan, sound: boolean): NightProgress => ({
