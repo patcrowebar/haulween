@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { SessionCache } from './cache';
 import { FallbackGeocoder, NominatimGeocoder, PhotonGeocoder, Throttle } from './geocoder';
 import {
-  ALL_FAILED, OVERPASS_SERVERS, OVERPASS_TIMEOUT_MS, OVERPASS_TOTAL_MS, OverpassClient, RETIRED_SERVER, errorText, type Attempt,
+  ALL_FAILED, NOT_USED, OVERPASS_SERVERS, OVERPASS_TIMEOUT_MS, OVERPASS_TOTAL_MS, OverpassClient, PRIVATE_COFFEE, RELAY, errorText,
+  type Attempt,
 } from './overpass';
 import { WeatherClient } from './weather';
 import { PLACEHOLDER_ADDRESS } from '../config';
@@ -50,7 +51,8 @@ const hosts = (net: ReturnType<typeof fakeNet>) => net.calls.map((x) => new URL(
 
 describe('the request overpass-api.de refused', () => {
   it("isn't sent there at all", () => {
-    expect(OVERPASS_SERVERS).not.toContain(RETIRED_SERVER);
+    expect(OVERPASS_SERVERS.map((x) => x.url)).not.toContain('https://overpass-api.de/api/interpreter');
+    expect(Object.keys(NOT_USED)).toContain('https://overpass-api.de/api/interpreter');
   });
 
   it('a 406 refusal is never retried; the next server is asked', async () => {
@@ -67,6 +69,79 @@ describe('the request overpass-api.de refused', () => {
     await c.streetsNear(41.8, -82.1);
     expect(hosts(net)).toEqual(['a', 'a', 'b']);
     expect(attempts.map((a) => a.outcome)).toEqual(['unreachable', 'unreachable', 'ok']);
+  });
+});
+
+describe('the relay', () => {
+  type RelayAnswer = { status: number; body: string; header?: boolean } | 'hang';
+  /** The relay (a same-site path) and Private.coffee, each scripted. */
+  function withRelay(relay: (n: number) => RelayAnswer, coffee: Answer = OK) {
+    let n = 0;
+    const net = fakeNet((u) => {
+      if (!u.startsWith('/api/streets')) return u === PRIVATE_COFFEE.url ? coffee : 'offline';
+      const a = relay(n++);
+      return a === 'hang' ? 'hang' : { status: a.status, body: a.body };
+    });
+    // Mark relay answers with its header, as the real one does (unless the script says not to).
+    const plain = net.fetch;
+    const marked = ((url: string, init?: RequestInit) => plain(url, init).then((res) => {
+      if (!url.startsWith('/api/streets')) return res;
+      const a = relay(n - 1);
+      if (a !== 'hang' && a.header === false) return res;
+      const h = new Headers(res.headers);
+      h.set('x-haulween-relay', '1');
+      return new Response(res.body, { status: res.status, headers: h });
+    })) as typeof fetch;
+    const progress: string[] = [];
+    const attempts: Attempt[] = [];
+    const c = new OverpassClient(marked, new SessionCache('t.', null), {
+      timeoutMs: 30, totalMs: 5_000, isOnline: () => true, sleep: async () => {},
+      onProgress: (t) => progress.push(t), onAttempt: (a) => attempts.push(a),
+    });
+    return { c, net, progress, attempts };
+  }
+  const where = (net: ReturnType<typeof fakeNet>) => net.calls.map((x) => (x.url.startsWith('/api/') ? 'relay' : 'coffee'));
+
+  it('answers first when it works', async () => {
+    const { c, net } = withRelay(() => ({ status: 200, body: OK.body }));
+    await c.streetsNear(41.8, -82.1);
+    expect(where(net)).toEqual(['relay']);
+  });
+
+  it('with no key set up (a fork), skips straight to the free servers', async () => {
+    const { c, net, progress, attempts } = withRelay(() => ({ status: 501, body: '{"error":"not-configured"}' }));
+    await c.streetsNear(41.8, -82.1);
+    expect(where(net)).toEqual(['relay', 'coffee']);
+    expect(progress).toEqual([]); // nothing failed, so no "trying another server"
+    expect(attempts[0]).toMatchObject({ server: 'Haulween relay (Overpass.ch)', outcome: 'not set up', status: 501 });
+    // Asked once per visit: the next plan goes straight to the free servers.
+    await c.streetsNear(41.9, -82.2);
+    expect(where(net)).toEqual(['relay', 'coffee', 'coffee']);
+  });
+
+  it('on a site with no relay at all (local development, other hosts), skips it', async () => {
+    const { c, net } = withRelay(() => ({ status: 200, body: '<!doctype html><html></html>', header: false }));
+    await c.streetsNear(41.8, -82.1);
+    expect(where(net)).toEqual(['relay', 'coffee']);
+  });
+
+  it('a 429 through the relay is not retried', async () => {
+    const { c, net } = withRelay(() => ({ status: 429, body: '{"error":"upstream-status"}' }));
+    await c.streetsNear(41.8, -82.1);
+    expect(where(net)).toEqual(['relay', 'coffee']);
+  });
+
+  it('a quick failure is retried once, and the 4-attempt limit holds', async () => {
+    const { c, net } = withRelay(() => ({ status: 502, body: '{"error":"upstream-unreachable"}' }), { status: 502, body: 'x' });
+    await expect(c.streetsNear(41.8, -82.1)).rejects.toThrow(ALL_FAILED);
+    expect(where(net)).toEqual(['relay', 'relay', 'coffee', 'coffee']);
+  });
+
+  it('shows in ?debug as its own line, with no key, point or address', async () => {
+    const { c, attempts } = withRelay(() => ({ status: 200, body: OK.body }));
+    await c.streetsNear(41.8, -82.1);
+    expect(attempts).toEqual([{ server: RELAY.label, status: 200, ms: expect.any(Number), outcome: 'ok', error: null, bytes: OK.body.length }]);
+    expect(JSON.stringify(attempts)).not.toMatch(/41\.8|82\.1|lat=|key/i);
   });
 });
 

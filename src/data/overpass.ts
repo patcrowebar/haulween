@@ -1,49 +1,50 @@
-// Street data from the OpenStreetMap Overpass API. One POST per plan, cached per rounded home
-// point for the session. Overpass only ever sees the home point rounded to 3 decimals (~100 m).
+// Street data from OpenStreetMap through Overpass. One successful request per plan, cached per
+// rounded home point for the session. Overpass only ever sees the home point rounded to
+// 3 decimals (~100 m), never the address.
 //
-// Servers are asked one at a time, never in parallel. A server that fails fast gets one more
-// try after a short pause; then the next server. Everything together stops after about 45 s.
+// Asked in turn, never in parallel, at most 4 attempts and about 45 s in all:
+//   1. Haulween's relay (api/streets.ts), which asks Overpass.ch with a key kept in Vercel.
+//      A site without it (a fork, or local development) just skips it.
+//   2. Private.coffee, directly from the browser.
+// A server that fails fast gets one more try after a short pause; a 406 or 429 never does.
 //
-// Not overpass-api.de. Its operator (FOSSGIS) asks fast-deployed AI-generated apps not to use it
-// (wiki.openstreetmap.org/wiki/Overpass_API), and it answers this site's requests with
-// 406 Not Acceptable. Leaving out the Referer would get past that, but only by hiding who's
-// asking, so Haulween uses servers that welcome any project instead, and keeps identifying itself.
+// Not used: overpass-api.de, whose operator (FOSSGIS) asks apps on fast-deploy platforms not to
+// use it, and which refuses this site with 406 (leaving out the Referer would get past that, but
+// only by hiding who's asking); and VK Maps, operated in Russia. Haulween never uses services
+// operated in Russia.
 
 import { HOME_POINT_DECIMALS } from '../config';
 import { fromOverpass } from '../route/osm';
 import type { OsmData } from '../route/types';
+import { RADIUS_M, RELAY_HEADER, overpassQuery, relayPath } from '../../api/streets';
 import {
   RequestError, SessionCache, TimeoutError, browserIsOnline, fetchTextWithin, worstOf, type FailKind,
 } from './cache';
 
-/**
- * Public servers, in the order they're asked. Both are global, free and open to any project with
- * no rate limit (OSM wiki, October 2026), and both send CORS headers. VK Maps goes first: when
- * it's struggling it says so at once, in a way the browser can read, so moving on costs little.
- */
-export const OVERPASS_SERVERS = [
-  'https://maps.mail.ru/osm/tools/overpass/api/interpreter', // VK Maps
-  'https://overpass.private.coffee/api/interpreter', // Private.coffee
-] as const;
-/** Never asked: its operator asks apps like this one not to (see above). */
-export const RETIRED_SERVER = 'https://overpass-api.de/api/interpreter';
-/** Enough streets for a 2 to 3 hour window. */
-export const RADIUS_M = 900;
+export { RADIUS_M, overpassQuery };
+
+export type Server = { label: string; url: string; relay?: boolean };
+
+/** Haulween's own relay, on the same site. Only ever sees the rounded point and radius. */
+export const RELAY: Server = { label: 'Haulween relay (Overpass.ch)', url: '/api/streets', relay: true };
+/** Global, free, open to any project with no rate limit (OSM wiki, October 2026), sends CORS headers. */
+export const PRIVATE_COFFEE: Server = { label: 'overpass.private.coffee', url: 'https://overpass.private.coffee/api/interpreter' };
+
+/** In the order they're asked. */
+export const OVERPASS_SERVERS: readonly Server[] = [RELAY, PRIVATE_COFFEE];
+
+/** Never asked, with why. */
+export const NOT_USED = {
+  'https://overpass-api.de/api/interpreter': "its operator's policy excludes apps on fast-deploy platforms",
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter': 'operated in Russia',
+} as const;
+
+/** Most requests for one plan, across every server and retry. */
+export const MAX_ATTEMPTS = 4;
 
 export function roundPoint(lat: number, lng: number, decimals = HOME_POINT_DECIMALS): [number, number] {
   const m = 10 ** decimals;
   return [Math.round(lat * m) / m, Math.round(lng * m) / m];
-}
-
-/** The query from reference/street-lookup.md: named roads, parks, schools, churches, sidewalks. */
-export function overpassQuery(lat: number, lng: number, radius = RADIUS_M): string {
-  const around = `around:${radius},${lat},${lng}`;
-  return `[out:json][timeout:60];
-way(${around})[highway~"^(residential|living_street|unclassified|tertiary|secondary|primary|trunk)$"][name];out tags geom;
-way(${around})[leisure~"^(park|pitch|playground|recreation_ground)$"];out tags geom;
-way(${around})[amenity~"^(school|place_of_worship)$"];out tags geom;
-way(${around})[landuse~"^(grass|recreation_ground|cemetery|commercial|retail)$"];out tags geom;
-way(${around})[footway=sidewalk];out geom;`;
 }
 
 type Fetch = typeof fetch;
@@ -73,20 +74,22 @@ export const MESSAGES: Record<FailKind, string> = {
   bad: "The street map sent something we couldn't read. Wait a minute and try again.",
 };
 
-/** One request to one server, for ?debug. Never the query, the address or coordinates. */
+/** One request to one server, for ?debug. Never the query, the address, coordinates or a key. */
 export type Attempt = {
   server: string;
   /** HTTP status, or null when no answer reached the page. */
   status: number | null;
   ms: number;
-  outcome: 'ok' | 'saved' | FailKind;
+  /** "not set up": this site has no relay, or no key for it. Not a failure: on to the next. */
+  outcome: 'ok' | 'saved' | 'not set up' | FailKind;
   /** The browser's error type ("TypeError", "TimeoutError"), and its words when they're safe to show. */
   error: string | null;
   bytes: number | null;
 };
 
 export type OverpassOptions = {
-  servers?: readonly string[];
+  /** Servers, or plain interpreter URLs (for tests). */
+  servers?: readonly (Server | string)[];
   /** Per server, and in all. */
   timeoutMs?: number;
   totalMs?: number;
@@ -110,7 +113,9 @@ export class OverpassClient {
   private cache: SessionCache<OsmData>;
   private inFlight = new Map<string, Promise<OsmData>>();
 
-  private servers: readonly string[];
+  private servers: readonly Server[];
+  /** The relay said it isn't set up: don't ask it again this visit. */
+  private relayOff = false;
   private timeoutMs: number;
   private totalMs: number;
   private retryPauseMs: number;
@@ -122,7 +127,7 @@ export class OverpassClient {
 
   constructor(private fetchFn: Fetch = (...a) => fetch(...a), cache?: SessionCache<OsmData>, options: OverpassOptions = {}) {
     this.cache = cache ?? new SessionCache<OsmData>('haulween.osm.');
-    this.servers = options.servers ?? OVERPASS_SERVERS;
+    this.servers = (options.servers ?? OVERPASS_SERVERS).map((x) => (typeof x === 'string' ? { label: new URL(x).host, url: x } : x));
     this.timeoutMs = options.timeoutMs ?? OVERPASS_TIMEOUT_MS;
     this.totalMs = options.totalMs ?? OVERPASS_TOTAL_MS;
     this.retryPauseMs = options.retryPauseMs ?? RETRY_PAUSE_MS;
@@ -151,24 +156,31 @@ export class OverpassClient {
     return data;
   }
 
-  /** Each server in turn, one retry for a quick failure, all within the total time limit. */
+  /** Each server in turn, one retry for a quick failure, within the attempt and time limits. */
   private async fetchStreets(lat: number, lng: number): Promise<OsmData> {
     const deadline = this.now() + this.totalMs;
     const kinds: FailKind[] = [];
-    for (const [i, url] of this.servers.entries()) {
-      if (i > 0) this.onProgress('Trying another map server…');
+    let sent = 0;
+    for (const server of this.servers) {
+      if (server.relay && this.relayOff) continue;
+      if (kinds.length) this.onProgress('Trying another map server…');
       for (let attempt = 0; attempt < 2; attempt++) {
         const left = deadline - this.now();
-        if (left < Math.min(MIN_TRY_MS, this.totalMs)) return this.giveUp(kinds);
+        if (sent >= MAX_ATTEMPTS || left < Math.min(MIN_TRY_MS, this.totalMs)) return this.giveUp(kinds);
         const started = this.now();
+        sent++;
         try {
-          return await this.ask(url, lat, lng, Math.min(this.timeoutMs, left));
+          return await this.ask(server, lat, lng, Math.min(this.timeoutMs, left));
         } catch (e) {
+          if (e instanceof NotSetUp) {
+            this.relayOff = true;
+            break;
+          }
           const err = e as RequestError;
           kinds.push(err.kind);
           if (err.kind === 'offline') return this.giveUp(kinds);
-          // One more try only for a quick failure that a moment might fix. Never for a 429 (the
-          // server asked us to slow down) or an answer it can't give (4xx, unreadable).
+          // One more try only for a quick failure that a moment might fix. Never for a 406 or 429
+          // (the server refused, or asked us to slow down) or an answer it can't give.
           const quick = this.now() - started < FAST_FAIL_MS;
           const passing = err.kind === 'down' || err.kind === 'unreachable' || (err.kind === 'busy' && err.status === 504);
           if (attempt > 0 || !quick || !passing) break;
@@ -188,15 +200,19 @@ export class OverpassClient {
   }
 
   /** One request to one server, timed and reported for ?debug. */
-  private async ask(url: string, lat: number, lng: number, timeoutMs: number): Promise<OsmData> {
+  private async ask(server: Server, lat: number, lng: number, timeoutMs: number): Promise<OsmData> {
     const t0 = this.now();
     const report = (outcome: Attempt['outcome'], status: number | null, error: string | null, bytes: number | null) =>
-      this.onAttempt({ server: new URL(url).host, status, ms: this.now() - t0, outcome, error, bytes });
+      this.onAttempt({ server: server.label, status, ms: this.now() - t0, outcome, error, bytes });
     try {
-      const out = await this.askOnce(url, lat, lng, timeoutMs);
+      const out = await this.askOnce(server, lat, lng, timeoutMs);
       report('ok', out.status, null, out.bytes);
       return out.data;
     } catch (e) {
+      if (e instanceof NotSetUp) {
+        report('not set up', e.status, null, null);
+        throw e;
+      }
       const r = e as RequestError & { cause?: unknown; bytes?: number };
       report(r.kind, r.status ?? null, r.cause === undefined ? null : errorText(r.cause), r.bytes ?? null);
       throw e;
@@ -204,26 +220,31 @@ export class OverpassClient {
   }
 
   /** One request to one server. Always throws a RequestError on failure. */
-  private async askOnce(url: string, lat: number, lng: number, timeoutMs: number): Promise<{ data: OsmData; status: number; bytes: number }> {
+  private async askOnce(server: Server, lat: number, lng: number, timeoutMs: number): Promise<{ data: OsmData; status: number; bytes: number }> {
     let text = '';
     const fail = (kind: FailKind, status?: number, cause?: unknown) =>
       Object.assign(new RequestError(MESSAGES[kind], kind, status), { cause, bytes: text.length || undefined });
     let res: Response;
+    // The relay takes only the rounded point and the radius, and builds the query itself.
+    const url = server.relay ? relayPath(lat.toFixed(HOME_POINT_DECIMALS), lng.toFixed(HOME_POINT_DECIMALS), RADIUS_M) : server.url;
+    const init: RequestInit = server.relay ? { method: 'GET' } : {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(overpassQuery(lat, lng)),
+      // The browser's default: the server sees which site is asking (the site's origin, never a
+      // page address). Overpass operators ask apps to identify themselves; Haulween does.
+      referrerPolicy: 'strict-origin-when-cross-origin',
+    };
     try {
-      ({ res, text } = await fetchTextWithin(this.fetchFn, url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'data=' + encodeURIComponent(overpassQuery(lat, lng)),
-        // The browser's default: the server sees which site is asking (the site's origin, never a
-        // page address). Overpass operators ask apps to identify themselves; Haulween does.
-        referrerPolicy: 'strict-origin-when-cross-origin',
-      }, timeoutMs));
+      ({ res, text } = await fetchTextWithin(this.fetchFn, url, init, timeoutMs));
     } catch (e) {
       if (e instanceof TimeoutError) throw fail('timeout', undefined, e);
       // No answer reached the page. A refusal can look like this (some arrive without CORS
       // headers), but so can a block or a dropped connection, so it isn't called "busy".
       throw fail(this.isOnline() ? 'unreachable' : 'offline', undefined, e);
     }
+    // No relay on this site (a fork, local development), or no key for it: on to the next server.
+    if (server.relay && (!res.headers.get(RELAY_HEADER) || res.status === 501)) throw new NotSetUp(res.status);
     // "Busy" means exactly what the service said: 429 Too Many Requests or 504 Gateway Timeout.
     if (res.status === 429 || res.status === 504) throw fail('busy', res.status);
     if (res.status >= 500) throw fail('down', res.status);
@@ -240,5 +261,12 @@ export class OverpassClient {
     if (body.remark && /error|limit|timed out|dispatcher/i.test(body.remark)) throw fail('down', res.status);
     if (!Array.isArray(body.elements)) throw fail('bad', res.status);
     return { data: fromOverpass(body as Parameters<typeof fromOverpass>[0]), status: res.status, bytes: text.length };
+  }
+}
+
+/** The relay isn't there, or has no key. */
+class NotSetUp extends Error {
+  constructor(readonly status: number) {
+    super('not set up');
   }
 }

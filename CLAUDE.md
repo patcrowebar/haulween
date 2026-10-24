@@ -6,9 +6,16 @@ The product spec is `docs/build-brief.md`. Read it before building a feature. Th
 
 ## Stack
 
-- **Static site.** React + TypeScript + Vite. There's no server, backend, database or serverless function. If a task seems to need one, stop and ask.
+- **Static site.** React + TypeScript + Vite. There's no server, backend or database. The one approved exception is the street-data relay below. If a task seems to need anything else server-side, stop and ask.
 - **Map:** MapLibre GL JS with OpenFreeMap vector tiles (no key). Recolor the style dark to match the theme.
-- **Street data:** the OpenStreetMap Overpass API, called from the browser.
+- **Street data:** OpenStreetMap through Overpass: Haulween's relay (Overpass.ch) first, then Private.coffee directly from the browser.
+- **The relay (`api/streets.ts`), the one approved server-side piece.** A single Vercel function that asks Overpass.ch with a key kept in Vercel's settings (`OVERPASS_KEY`), so the key never reaches the browser, the repo or a log. Free public servers are overloaded and refuse fast-deploy apps; a keyed provider keeps planning working. Its rules:
+  - It takes only a home point rounded to 3 decimals and the search radius (200 to 1500 m), in one exact form, builds the app's own query itself and refuses everything else. It must never work as a general Overpass proxy (Overpass.ch forbids reselling raw access).
+  - No key configured: it answers 501 and the app goes straight to the free servers. That's how forks run.
+  - Good answers are cached by rounded point for 6 hours (Vercel's cache headers), so repeat plans don't spend quota. Failures are never cached.
+  - It logs nothing about requests: no IPs, points or timings tied to a visitor. Failures are logged as a short category only, never with the request, the URL (the key is in it) or an error object.
+  - It checks Origin, which only stops other websites' pages; anyone outside a browser can fake it. Overpass.ch's free-tier cap (10,000 requests a month, no overage charges) is the backstop.
+  - Never put the key in code, tests, docs, logs or `.env` files in the repo (`.env*` is git-ignored).
 - **Address lookup:** Nominatim, behind a `Geocoder` interface so Photon can be swapped in.
 - **Weather and sunset:** Open-Meteo (no key).
 - **AI (optional):** Claude, called straight from the browser with the visitor's own key.
@@ -38,6 +45,8 @@ src/
     schedule.ts    # pace, door time, crossings, times, head-home and latest times
     check.ts       # route check: every stretch on a real street, never along a busy road
   data/         # Overpass, geocoder, Open-Meteo clients (polite, cached)
+api/
+  streets.ts    # the street-data relay (Vercel function), and the one Overpass query
   ai/           # Claude client and tool definitions (optional feature)
   map/          # MapLibre setup, layers, dark style
   screens/      # Plan, Night Mode, Settings
@@ -69,7 +78,7 @@ These come from real bugs. Don't relax them without asking.
 ## Privacy
 
 - **The street address goes only to the geocoder.** Everything after that uses coordinates.
-- **Overpass gets the home point rounded to 3 decimals** (about 100 m).
+- **Overpass gets the home point rounded to 3 decimals** (about 100 m). Through the relay, Overpass.ch sees Vercel's address, not the visitor's.
 - **Plans, settings and the API key stay in the visitor's browser** (`localStorage`). There's no analytics, telemetry or error reporting that sends data out.
 - **Never log addresses, coordinates or keys** to the console in production builds.
 - **Use the placeholder address in every example, test, screenshot caption and doc:** 1428 Elm St, Springwood, OH (the house from *A Nightmare on Elm Street*). Never commit a real home address or a street-data sample from someone's real home neighborhood.
@@ -97,7 +106,9 @@ The in-app AI guide is called **Jack**. He speaks in short, friendly lines, like
 
 ## Being a good neighbor to free services
 
-- **Overpass:** one POST per plan, cached per rounded home point for the session. Never query in a loop.
+- **Overpass:** one successful request per plan, cached per rounded home point for the session. At most 4 attempts, one at a time, never in parallel, about 45 s in all. No retry after a 406 or 429. Never query in a loop.
+- **overpass-api.de is not used** because its policy excludes apps on fast-deploy platforms. Don't strip the Referer or otherwise hide who's asking to get past a server's rules.
+- **Never use services operated in Russia.**
 - **Nominatim:** look up only when the visitor presses Search, never as they type. Cache results, allow at most one request per second, and show its credit. If it fails or pushes back, switch to Photon.
 - **OpenFreeMap and OpenStreetMap credits are always visible** on the map, through MapLibre's attribution control. OpenStreetMap data is ODbL-licensed, so attribution is required.
 
@@ -121,5 +132,5 @@ Plain, short and friendly, written for a parent standing on a sidewalk. Name str
 - **Changes to route logic need a test** that would have caught the bug.
 - **Keep `src/route/` free of React and network calls.**
 - **Ask before adding a dependency.** Prefer none.
-- **Don't add a server, analytics, accounts, cloud saving or share links.** They're out of scope for v1 (see the brief).
+- **Don't add a server, analytics, accounts, cloud saving or share links.** They're out of scope for v1 (see the brief). The street-data relay is the one approved exception; don't grow it into anything more.
 - **Write commit messages people can follow along with,** since this is built in public. Say what changed and why.

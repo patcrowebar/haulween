@@ -33,10 +33,27 @@ Phones only allow GPS on `https`, so test Night Mode on the deployed site.
 
 ## How it works
 
-- Streets come from OpenStreetMap through free public Overpass servers (VK Maps, then Private.coffee). Only your home point, rounded to about 100 m, is sent.
-- Address lookup uses Nominatim, and only when you press Search.
+- Streets come from OpenStreetMap through Overpass: first Haulween's relay, a small Vercel function that asks Overpass.ch with a key kept in Vercel, then Private.coffee if the relay can't help.
+- Address lookup uses Nominatim (Photon as a backup), and only when you press Search.
 - Weather and sunset come from Open-Meteo.
 - Jack, the AI guide, is optional and uses your own Claude API key, kept only in your browser.
+
+## Privacy
+
+Who gets what:
+
+| Service | Gets | Sees your internet address? |
+| --- | --- | --- |
+| Nominatim, or Photon as a backup | The address you typed, only when you press Search | Yes |
+| Haulween's relay (Vercel) | Your home point rounded to about 100 m, and the search radius | Yes, as any website does. The relay itself logs nothing about requests. |
+| Overpass.ch (servers in Germany), through the relay | The same rounded point, as a street-map query | No: it sees Vercel's address, not yours |
+| Private.coffee, only if the relay can't help | The same rounded point, as a street-map query | Yes |
+| Open-Meteo | Your home point rounded to about 1 km, and the night | Yes |
+| OpenFreeMap | The map area you're looking at, as map tiles | Yes |
+
+Your address, plans, settings and any API key stay in your browser. There are no accounts, analytics or tracking. Haulween never uses overpass-api.de (its policy excludes apps on fast-deploy platforms) or any service operated in Russia.
+
+**Running your own copy:** without an `OVERPASS_KEY` in your host's settings, the relay says so and Haulween goes straight to the free servers.
 
 House counts are estimates from street frontage. Haulween never promises which houses give candy.
 

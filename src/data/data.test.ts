@@ -1,58 +1,62 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SessionCache } from './cache';
 import { FallbackGeocoder, NominatimGeocoder, PhotonGeocoder, Throttle } from './geocoder';
-import { ALL_FAILED, OVERPASS_SERVERS, OverpassClient, RETIRED_SERVER, roundPoint } from './overpass';
-
-const [FIRST, SECOND] = OVERPASS_SERVERS;
-/** A client with no real pauses between tries. */
-const quick = (fetchFn: unknown) =>
-  new OverpassClient(fetchFn as typeof fetch, new SessionCache('t.', null), { sleep: async () => {}, isOnline: () => true });
+import {
+  ALL_FAILED, MAX_ATTEMPTS, NOT_USED, OVERPASS_SERVERS, OverpassClient, PRIVATE_COFFEE, RELAY, roundPoint,
+} from './overpass';
 import { WeatherClient, addMinutes, flagsFor } from './weather';
 import { PLACEHOLDER_ADDRESS } from '../config';
 
-const json = (body: unknown, status = 200) =>
-  Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }));
+const FIRST = 'https://a.test/api/interpreter';
+const SECOND = 'https://b.test/api/interpreter';
+const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+  Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } }));
 const noWait = new Throttle(0);
+/** Two plain servers, no relay, no real pauses between tries. */
+const quick = (fetchFn: unknown) => new OverpassClient(fetchFn as typeof fetch, new SessionCache('t.', null), {
+  servers: [FIRST, SECOND], sleep: async () => {}, isOnline: () => true,
+});
+const urls = (f: ReturnType<typeof vi.fn>) => f.mock.calls.map((c) => (c as unknown as [string])[0]);
 
 describe('Overpass client', () => {
-  it('rounds the home point to 3 decimals before it leaves the device', async () => {
-    const fetchFn = vi.fn(() => json({ elements: [] }));
+  it('asks the relay first, then Private.coffee, and nothing else', () => {
+    expect(OVERPASS_SERVERS).toEqual([RELAY, PRIVATE_COFFEE]);
+    for (const s of OVERPASS_SERVERS) {
+      expect(Object.keys(NOT_USED)).not.toContain(s.url);
+      expect(s.url).not.toMatch(/overpass-api\.de|mail\.ru|\.ru\//);
+    }
+    expect(MAX_ATTEMPTS).toBe(4);
+  });
+
+  it('rounds the home point to 3 decimals before it leaves the device, for the relay and the rest', async () => {
+    const fetchFn = vi.fn(() => json({ elements: [] })); // no relay header: this site has no relay
     await new OverpassClient(fetchFn, new SessionCache('t.', null)).streetsNear(41.8000824, -82.1003685);
-    const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe(FIRST);
+    expect(urls(fetchFn)).toEqual(['/api/streets?lat=41.800&lng=-82.100&r=900', PRIVATE_COFFEE.url]);
+    const [, init] = fetchFn.mock.calls[1] as unknown as [string, RequestInit];
     expect(init.method).toBe('POST');
     const query = decodeURIComponent(String(init.body).slice(5));
     expect(query).toContain('around:900,41.8,-82.1)');
-    expect(query).not.toContain('41.8000824');
+    expect(JSON.stringify(fetchFn.mock.calls)).not.toContain('41.8000824');
     expect(roundPoint(41.8006, -82.1004)).toEqual([41.801, -82.1]);
   });
 
   it('sends one request per rounded point, even when asked twice at once', async () => {
     const fetchFn = vi.fn(() => json({ elements: [] }));
-    const c = new OverpassClient(fetchFn, new SessionCache('t.', null));
+    const c = quick(fetchFn);
     await Promise.all([c.streetsNear(41.80001, -82.10001), c.streetsNear(41.80002, -82.10002)]);
     await c.streetsNear(41.8001, -82.1001);
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
   it('says "busy" when every server says so', async () => {
-    const c = quick(() => json({}, 429));
-    await expect(c.streetsNear(41.8, -82.1)).rejects.toThrow('The street map servers are busy right now. Try again in a few minutes.');
+    await expect(quick(() => json({}, 429)).streetsNear(41.8, -82.1))
+      .rejects.toThrow('The street map servers are busy right now. Try again in a few minutes.');
   });
-
-  const urls = (f: ReturnType<typeof vi.fn>) => f.mock.calls.map((c) => (c as unknown as [string])[0]);
 
   it('never touches the next server when the first answers', async () => {
     const fetchFn = vi.fn(() => json({ elements: [] }));
     await quick(fetchFn).streetsNear(41.8, -82.1);
     expect(urls(fetchFn)).toEqual([FIRST]);
-  });
-
-  it('never asks overpass-api.de, whose operator asks apps like this one not to', async () => {
-    const fetchFn = vi.fn(() => json({}, 500));
-    await quick(fetchFn).streetsNear(41.8, -82.1).catch(() => {});
-    expect(urls(fetchFn)).not.toContain(RETIRED_SERVER);
-    expect(OVERPASS_SERVERS).not.toContain(RETIRED_SERVER);
   });
 
   it('keeps identifying the site to the servers (no hiding the Referer)', async () => {
@@ -64,7 +68,8 @@ describe('Overpass client', () => {
   });
 
   it.each([
-    [429, [FIRST, SECOND]], // asked to slow down: no quick retry
+    [429, [FIRST, SECOND]], // asked to slow down: no retry
+    [406, [FIRST, SECOND]], // refused: no retry
     [504, [FIRST, FIRST, SECOND]],
     [500, [FIRST, FIRST, SECOND]],
   ])('after a quick %i, moves on as it should', async (status, expected) => {
@@ -72,8 +77,6 @@ describe('Overpass client', () => {
     const data = await quick(fetchFn).streetsNear(41.8, -82.1);
     expect(data.streets).toEqual([]);
     expect(urls(fetchFn)).toEqual(expected);
-    const [, init] = fetchFn.mock.calls[fetchFn.mock.calls.length - 1] as unknown as [string, RequestInit];
-    expect(decodeURIComponent(String(init.body))).toContain('around:900,41.8,-82.1)'); // still rounded
   });
 
   it('retries a server that got no answer at all, then tries the next', async () => {
@@ -82,10 +85,13 @@ describe('Overpass client', () => {
     expect(urls(fetchFn)).toEqual([FIRST, FIRST, SECOND]);
   });
 
-  it('when every server fails, says to try again in a few minutes', async () => {
-    const fetchFn = vi.fn((url: string) => json({}, url === FIRST ? 500 : 429));
-    await expect(quick(fetchFn).streetsNear(41.8, -82.1)).rejects.toThrow(ALL_FAILED);
-    expect(ALL_FAILED).toMatch(/try again in a few minutes/i);
+  it('when every server fails, says to try again in a few minutes, after at most 4 attempts', async () => {
+    const fetchFn = vi.fn(() => json({}, 500));
+    const c = new OverpassClient(fetchFn as unknown as typeof fetch, new SessionCache('t.', null), {
+      servers: [FIRST, SECOND, 'https://c.test/api/interpreter'], sleep: async () => {}, isOnline: () => true,
+    });
+    await expect(c.streetsNear(41.8, -82.1)).rejects.toThrow(ALL_FAILED);
+    expect(fetchFn).toHaveBeenCalledTimes(4);
   });
 });
 
