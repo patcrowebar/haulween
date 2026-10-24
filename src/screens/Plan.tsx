@@ -8,6 +8,7 @@ import { WeatherClient, type Tonight } from '../data/weather';
 import type { OsmData, Pt } from '../route/types';
 import Results from './Results';
 import { freshProgress, loadNight, saveNight, type NightPlan } from './nightStore';
+import { loadPlanned, plannedFor, savePlanned, updatePlanned } from './planStore';
 import { Planner, isCancelled, plainMessage } from './planner';
 import {
   DEFAULT_FORM, asksDoorTime, doorEstimate, doorSecondsFor, routeTitle, toForm, youngestAge, type PlanForm, type PlanOnce,
@@ -67,19 +68,21 @@ export default function Plan({ onNight }: { onNight: () => void }) {
   const resultsRef = useRef<HTMLDivElement>(null);
   const [saved] = useState(() => loadNight());
   const [startError, setStartError] = useState<string | null>(null);
+  /** Said when the phone had no room to keep the route for next time. */
+  const [keepNote, setKeepNote] = useState<string | null>(null);
 
   const set = <K extends keyof PlanForm>(k: K, v: PlanForm[K]) => setForm((f) => ({ ...f, [k]: v }));
   const youngest = youngestAge(form.ages);
 
   /** Plan at the chosen door time and show it. Other door times are planned only when tapped. */
-  async function show(next: Found, f: PlanForm) {
+  async function show(next: Found, f: PlanForm): Promise<PlanOnce | null> {
     planner.cancel();
     const gen = ++generation.current;
     byDoor.current = new Map();
     setPendingDoor(null);
     const door = doorSecondsFor(f);
     const main = await planner.run(next.data, next.home, f, door);
-    if (gen !== generation.current) return;
+    if (gen !== generation.current) return null;
     byDoor.current.set(door, main);
     setFound(next);
     setOutcome({
@@ -89,6 +92,13 @@ export default function Plan({ onNight }: { onNight: () => void }) {
         : null,
     });
     if (!main.result.ok) setError(NO_ROUTE);
+    return main;
+  }
+
+  /** Keep a route just planned, so reopening Haulween shows it again without fetching streets. */
+  function keep(next: Found, f: PlanForm, forecast: Tonight | null) {
+    const ok = savePlanned({ v: 1, form: f, home: next.home, title: next.title, tonight: forecast }, next.data);
+    setKeepNote(ok ? null : "This phone had no room to keep the route for next time. It's fine for now; plan again before you go.");
   }
 
   async function plan(f: PlanForm, asDemo: boolean) {
@@ -104,11 +114,27 @@ export default function Plan({ onNight }: { onNight: () => void }) {
     setStatus('working');
     try {
       let next: Found;
+      /** The forecast, when it's already in hand; otherwise it's on its way. */
+      let forecast: Tonight | null = null;
+      let coming: Promise<Tonight> | null = null;
+      // The same address as the route kept on this phone: reuse its streets, no lookups at all.
+      const kept = asDemo ? null : plannedFor(f.address);
       if (asDemo) {
         const { DEMO } = await import('../demo');
         next = { home: DEMO.home, title: DEMO.title, data: DEMO.data, demo: true };
         setTonight(DEMO.tonight);
         setWeatherNote(null);
+      } else if (kept) {
+        saveForm(f);
+        const k = kept.planned;
+        next = { home: k.home, title: k.title, data: kept.data, demo: false };
+        if (k.tonight && k.form.date === f.date && k.form.start === f.start && k.form.end === f.end) {
+          forecast = k.tonight;
+          setTonight(k.tonight);
+          setWeatherNote(null);
+        } else {
+          coming = forecastFor(next.home, f);
+        }
       } else {
         saveForm(f);
         let place = lastPlace.current?.address === f.address.trim() ? lastPlace.current.place : null;
@@ -125,22 +151,57 @@ export default function Plan({ onNight }: { onNight: () => void }) {
         }
         const home: Pt = [place.lat, place.lng];
         setStep('Getting the streets…');
-        const wx = weather.tonight(place.lat, place.lng, f.date, hourOf(f.start), hourOf(f.end));
+        coming = forecastFor(home, f);
         const data = await overpass.streetsNear(place.lat, place.lng);
         next = { home, title: routeTitle(place), data, demo: false };
-        wx.then((t) => { setTonight(t); setWeatherNote(null); }).catch(() => {
-          setTonight(null);
-          setWeatherNote('No forecast for that night yet. Open-Meteo forecasts about two weeks ahead.');
-        });
       }
       setStep('Planning your route…');
-      await show(next, f);
+      const main = await show(next, f);
+      if (main?.result.ok && !asDemo) {
+        keep(next, f, forecast);
+        // Kept first, so a forecast that comes in later goes with this route, not the last one.
+        coming?.then((t) => updatePlanned({ tonight: t }), () => {});
+      }
       setStatus('done');
       requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ block: 'start' }));
     } catch (e) {
       if (isCancelled(e)) return;
       setError(plainMessage(e));
       setStatus(found ? 'done' : 'idle');
+    } finally {
+      setStep('');
+    }
+  }
+
+  /** Tonight's weather, shown when it comes in. */
+  function forecastFor(home: Pt, f: PlanForm): Promise<Tonight> {
+    const wx = weather.tonight(home[0], home[1], f.date, hourOf(f.start), hourOf(f.end));
+    wx.then((t) => {
+      setTonight(t);
+      setWeatherNote(null);
+    }).catch(() => {
+      setTonight(null);
+      setWeatherNote('No forecast for that night yet. Open-Meteo forecasts about two weeks ahead.');
+    });
+    return wx;
+  }
+
+  /** Show the route kept on this phone, worked out again here. No network at all. */
+  async function reopen() {
+    const hit = loadPlanned();
+    if (!hit) return;
+    const { planned, data } = hit;
+    setForm(planned.form);
+    setTonight(planned.tonight);
+    setStatus('working');
+    setStep('Opening your saved route…');
+    try {
+      const main = await show({ home: planned.home, title: planned.title, data, demo: false }, planned.form);
+      setStatus(main ? 'done' : 'idle');
+    } catch (e) {
+      if (isCancelled(e)) return;
+      setError(plainMessage(e));
+      setStatus('idle');
     } finally {
       setStep('');
     }
@@ -164,12 +225,16 @@ export default function Plan({ onNight }: { onNight: () => void }) {
     setStatus('idle');
     setForm(loadForm());
     if (wantsDemo) window.history.replaceState(null, '', window.location.pathname);
+    reopen();
   }
 
   async function chooseDoor(seconds: number) {
     const f = { ...form, doorSeconds: seconds };
     setForm(f);
-    if (!demo) saveForm(f);
+    if (!demo) {
+      saveForm(f);
+      updatePlanned({ form: f });
+    }
     if (!found) return;
     const gen = generation.current;
     const tap = ++lastTap.current;
@@ -197,6 +262,7 @@ export default function Plan({ onNight }: { onNight: () => void }) {
 
   useEffect(() => {
     if (wantsDemo) startDemo();
+    else reopen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -332,6 +398,7 @@ export default function Plan({ onNight }: { onNight: () => void }) {
           />
         )}
         {startError && <p className="error" role="alert">{startError}</p>}
+        {keepNote && <p className="muted small">{keepNote}</p>}
       </div>
     </main>
   );

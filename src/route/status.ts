@@ -3,12 +3,37 @@
 // after midnight), so a window that runs past midnight still adds up.
 
 import { fmtClock, type Schedule } from './schedule';
+import type { Track } from './track';
 
 /** Minutes -> "5:07 pm". */
 export const clock12 = (min: number) => `${fmtClock(min)} ${Math.floor((((min % 1440) + 1440) % 1440) / 60) >= 12 ? 'pm' : 'am'}`;
 
 /** Behind by less than this is still on track. */
 export const ON_TRACK_MIN = 3;
+
+/**
+ * Setting off up to this long before the planned start counts as starting the night early.
+ * Earlier than that (the evening before, say), moving or tapping doesn't start it: that's a
+ * look around, not the walk.
+ */
+export const EARLY_START_MIN = 120;
+
+/** Moving this far along the first street counts as setting off (GPS wobbles less than this). */
+export const SET_OFF_FT = 100;
+
+/** Could the night start now, ahead of plan, if they set off? */
+export const canStartEarly = (tl: Timeline, now: number) => now >= tl.start - EARLY_START_MIN;
+
+/**
+ * Has the night started? At the planned start, or earlier once they set off (within
+ * EARLY_START_MIN of it). Until then nothing is tracked and the bar says when it starts.
+ */
+export const hasStarted = (tl: Timeline, now: number, startedEarly: boolean) =>
+  now >= tl.start || (startedEarly && canStartEarly(tl, now));
+
+/** Before the start: did this GPS reading show them setting off along the route, early enough to count? */
+export const setsOffEarly = (tl: Timeline, now: number, before: Track, after: Track) =>
+  canStartEarly(tl, now) && (after.current > before.current || after.progressFt >= SET_OFF_FT);
 
 export type Timeline = {
   start: number;
@@ -19,6 +44,15 @@ export type Timeline = {
   latest: number | null;
   homeBy: number;
   windowEnd: number;
+  /** The plan's night, "2026-10-31", for saying when it starts. */
+  date?: string;
+};
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "2026-10-31" -> "Oct 31". */
+const dayText = (date: string) => {
+  const [, m, d] = date.split('-').map(Number);
+  return MONTHS[m - 1] ? `${MONTHS[m - 1]} ${d}` : 'on the night,';
 };
 
 /** "17:07" -> minutes, placed on or after `from` (minus a minute for rounding). */
@@ -29,7 +63,7 @@ const at = (hhmm: string, from: number) => {
   return t;
 };
 
-export function timeline(s: Schedule, start: number): Timeline {
+export function timeline(s: Schedule, start: number, date?: string): Timeline {
   const starts = s.rows.map((r) => at(r.t24, start));
   const homeBy = at(s.homeBy24, start);
   return {
@@ -39,6 +73,7 @@ export function timeline(s: Schedule, start: number): Timeline {
     latest: s.lastLeg ? at(s.lastLeg.latest24, start) : null,
     homeBy,
     windowEnd: at(s.windowEnd24, start),
+    date,
   };
 }
 
@@ -58,12 +93,14 @@ export type Status = {
  * Where the family stands. `fraction` is how far along the current row GPS puts them; without
  * it they get the benefit of the doubt: behind only once the row's planned end has passed.
  */
-export function nightStatus(tl: Timeline, current: number, fraction: number | null, now: number): Status {
+export function nightStatus(tl: Timeline, current: number, fraction: number | null, now: number, started = now >= tl.start): Status {
   const n = tl.rows.length;
   const headHomeIn = tl.headHome === null ? null : tl.headHome - now;
   if (current >= n) return { kind: 'done', text: 'Home! Nice haul.', behindMin: 0, headHomeIn, headingHome: false };
-  if (now < tl.start) {
-    return { kind: 'before', text: `Starts at ${clock12(tl.start)}`, behindMin: 0, headHomeIn, headingHome: false };
+  if (!started) {
+    // now < 0 means the plan's day hasn't come yet.
+    const when = now < -1440 ? `${tl.date ? dayText(tl.date) : 'on the night,'} at` : now < 0 ? 'tomorrow at' : 'at';
+    return { kind: 'before', text: `Starts ${when} ${clock12(tl.start)}`, behindMin: 0, headHomeIn, headingHome: false };
   }
   const row = tl.rows[current];
   const planned = fraction === null ? row.end : row.start + fraction * (row.end - row.start);

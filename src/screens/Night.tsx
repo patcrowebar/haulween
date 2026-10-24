@@ -4,7 +4,9 @@
 
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { nextStretchLink } from '../route/schedule';
-import { clock12, countdownText, minutesText, nightStatus, timeline, turnAroundDue } from '../route/status';
+import {
+  canStartEarly, clock12, countdownText, hasStarted, minutesText, nightStatus, setsOffEarly, timeline, turnAroundDue,
+} from '../route/status';
 import { checkOff, onReading, pointAlong, startTrack, uncheck, type Reading } from '../route/track';
 import type { Pt } from '../route/types';
 import {
@@ -57,7 +59,7 @@ export default function Night({ onLeave }: { onLeave: () => void }) {
 function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: NightPlan) => void; onLeave: () => void }) {
   const { segments, schedule } = plan;
   const n = segments.length;
-  const tl = useMemo(() => timeline(schedule, plan.start), [schedule, plan.start]);
+  const tl = useMemo(() => timeline(schedule, plan.start, plan.date), [schedule, plan.start, plan.date]);
 
   const [progress, setProgressState] = useState<NightProgress>(() => loadProgress(plan) ?? freshProgress(plan, false));
   const progressRef = useRef(progress);
@@ -67,7 +69,9 @@ function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: Nig
     saveProgress(p);
   }, []);
 
-  const [now, setNow] = useState(() => progress.demoClock ?? minutesOn(plan.date));
+  const [now, setNowState] = useState(() => progress.demoClock ?? minutesOn(plan.date));
+  const nowRef = useRef(now);
+  const setNow = useCallback((t: number) => { nowRef.current = t; setNowState(t); }, []);
   const [fraction, setFraction] = useState<number | null>(null);
   const [you, setYou] = useState<Pt | null>(null);
   const [rough, setRough] = useState<number | null>(null);
@@ -83,7 +87,8 @@ function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: Nig
   const sim = useRef({ row: 0, into: 0 });
 
   const { track } = progress;
-  const status = nightStatus(tl, track.current, fraction, now);
+  const started = hasStarted(tl, now, progress.startedEarly);
+  const status = nightStatus(tl, track.current, fraction, now, started);
   const countdown = countdownText(status);
   const link = nextStretchLink(segments, track.current);
   const doneHouses = progress.earlier.houses + schedule.rows.reduce((t, r, i) => t + (track.done[i] ? r.houses : 0), 0);
@@ -94,6 +99,7 @@ function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: Nig
   /** One GPS reading (real or the demo's): may move on one row, at the end of the current one. */
   const take = useCallback((r: Reading) => {
     const p = progressRef.current;
+    const t = nowRef.current;
     const res = onReading(p.track, segments, r);
     if (!res.used) {
       setRough(Math.round(r.accuracy));
@@ -101,9 +107,17 @@ function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: Nig
     }
     setRough(null);
     setYou([r.lat, r.lng]);
+    if (!hasStarted(tl, t, p.startedEarly)) {
+      // Before the start, the dot moves but nothing is tracked, unless they've set off along
+      // the route within a couple of hours of the start: then the night starts early.
+      if (!setsOffEarly(tl, t, p.track, res.track)) return;
+      setFraction(res.track.current === p.track.current ? res.fraction : null);
+      setProgress({ ...p, track: res.track, startedEarly: true });
+      return;
+    }
     setFraction(res.track.current === p.track.current ? res.fraction : null);
     if (res.track !== p.track) setProgress({ ...p, track: res.track });
-  }, [segments, setProgress]);
+  }, [segments, setProgress, tl]);
 
   // The clock: this phone's, or the demo's own (10x while the demo walk runs).
   useEffect(() => {
@@ -135,7 +149,7 @@ function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: Nig
     // Keep the demo clock across reloads, now and then.
     const save = setInterval(() => saveProgress(progressRef.current), 5000);
     return () => { clearInterval(id); clearInterval(save); saveProgress(progressRef.current); };
-  }, [plan.date, simulating, segments, tl, n, take]);
+  }, [plan.date, simulating, segments, tl, n, take, setNow]);
 
   // The turn-around alert: once, at the latest safe time.
   useEffect(() => {
@@ -222,7 +236,9 @@ function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: Nig
     const p = progressRef.current;
     const t = p.track.done[i] ? uncheck(p.track, i) : checkOff(p.track, i);
     setFraction(null);
-    setProgress({ ...p, track: t });
+    // A tap always counts. Close to the start, it also starts the night early.
+    const startedEarly = p.startedEarly || (!p.track.done[i] && canStartEarly(tl, nowRef.current));
+    setProgress({ ...p, track: t, startedEarly });
   }
 
   function toggleSim() {
@@ -238,7 +254,7 @@ function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: Nig
   }
 
   async function replan() {
-    const data = loadNightData();
+    const data = loadNightData(plan);
     if (!data) {
       setNote("The street data didn't fit on this phone, so replanning isn't possible. Use the check-offs and head home on time.");
       return;
@@ -260,7 +276,7 @@ function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: Nig
       const fresh: NightProgress = {
         track: startTrack(next.segments.length), alerted: false, sound: p.sound,
         earlier: { houses: doneHouses, streets: p.earlier.streets + p.track.done.filter(Boolean).length },
-        demoClock: p.demoClock,
+        demoClock: p.demoClock, startedEarly: true,
       };
       if (!saveNight(next, null, fresh)) {
         setNote("This phone wouldn't save the new plan. Keep going and head home by the time on the bar.");
@@ -317,6 +333,11 @@ function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: Nig
                 {' · '}{clock12(tl.rows[track.current].start)}
               </p>
               <h2 className="now-name">{row.street}</h2>
+              {!started && (
+                <p className="now-how muted">
+                  Night Mode starts following you at {clock12(tl.start)}, or as soon as you set off.
+                </p>
+              )}
               <p className="now-how">{patternText(row.pattern)}{row.houses ? ` · ~${row.houses} houses` : ''}</p>
               <button type="button" className="primary huge" onClick={() => tapRow(track.current)}>
                 {headingHome ? "We're home" : 'Done with this street'}

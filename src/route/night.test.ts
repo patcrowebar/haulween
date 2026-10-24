@@ -6,7 +6,7 @@ import { Geo, key } from './geo';
 import { planRoute } from './plan';
 import { replanFromHere } from './replan';
 import { nextStretchLink, parseClock } from './schedule';
-import { countdownText, nightStatus, timeline, turnAroundDue } from './status';
+import { countdownText, hasStarted, nightStatus, setsOffEarly, timeline, turnAroundDue } from './status';
 import { GPS_ACCURACY_M, checkOff, onReading, pointAlong, startTrack, uncheck, type Reading, type Track } from './track';
 import type { Pt } from './types';
 
@@ -233,5 +233,53 @@ describe('next stretch in Google Maps', () => {
     const homeNode = segs[segs.length - 1].points[segs[segs.length - 1].points.length - 1];
     expect(stops(later)[stops(later).length - 1]).toBe(loc(homeNode));
     expect(nextStretchLink(segs, segs.length)).toBeNull();
+  });
+});
+
+describe('starting the night early', () => {
+  const start = tl.start; // 5:00 pm on the plan's day
+  const t0 = startTrack(segs.length);
+  const along = (ft: number) => onReading(t0, segs, reading(pointAlong(segs[0].points, ft / segs[0].lengthFt))).track;
+
+  it('the evening before, says when it starts and never shows "behind"', () => {
+    const eveningBefore = start - 1440 + 120; // 7:00 pm the day before
+    for (const fraction of [null, 0, 0.5]) {
+      const s = nightStatus(tl, 0, fraction, eveningBefore, hasStarted(tl, eveningBefore, false));
+      expect(s).toMatchObject({ kind: 'before', text: 'Starts tomorrow at 5:00 pm', behindMin: 0 });
+      expect(countdownText(s)).toBeNull();
+    }
+  });
+
+  it('days ahead, says which night', () => {
+    const tlDated = timeline(plan.schedule, start, '2026-10-31');
+    expect(nightStatus(tlDated, 0, null, start - 7 * 1440, false).text).toBe('Starts Oct 31 at 5:00 pm');
+  });
+
+  it('that morning, says when it starts', () => {
+    const morning = 9 * 60;
+    expect(nightStatus(tl, 0, null, morning, hasStarted(tl, morning, false)).text).toBe('Starts at 5:00 pm');
+  });
+
+  it("walking the route the evening before doesn't start the night", () => {
+    const eveningBefore = start - 1440 + 120;
+    expect(setsOffEarly(tl, eveningBefore, t0, along(300))).toBe(false);
+    expect(hasStarted(tl, eveningBefore, true)).toBe(false);
+  });
+
+  it('setting off along the route a little early starts the night, on track', () => {
+    const early = start - 15;
+    expect(setsOffEarly(tl, early, t0, along(300))).toBe(true);
+    expect(hasStarted(tl, early, true)).toBe(true);
+    expect(nightStatus(tl, 0, 0.3, early, true)).toMatchObject({ kind: 'on_track', behindMin: 0 });
+  });
+
+  it("standing at home with GPS wobbling doesn't count as setting off", () => {
+    const wobble = onReading(t0, segs, reading(nudge(segs[0].points[0], 8, 12), 15)).track;
+    expect(setsOffEarly(tl, start - 15, t0, wobble)).toBe(false);
+  });
+
+  it('starts at the start time on its own, without anyone moving', () => {
+    expect(hasStarted(tl, start, false)).toBe(true);
+    expect(nightStatus(tl, 0, null, start, true)).toMatchObject({ kind: 'on_track', text: 'On track' });
   });
 });

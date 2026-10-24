@@ -93,7 +93,9 @@ export default function Results({ outcome, plan, form, title, demo, tonight, wea
           <input type="checkbox" checked={sound} onChange={(e) => setSound(e.target.checked)} />
           <span>Play a sound when it's time to turn around</span>
         </label>
-        <p className="muted small">Night Mode follows you street by street. The plan is saved on this phone, so it works with no signal.</p>
+        <p className="muted small">
+          Saved on this phone. Once Night Mode is open, it keeps working if you lose signal. Open it before you head out.
+        </p>
       </div>
 
       <Suspense fallback={<div className="map-wrap"><div className="map" aria-busy="true" /></div>}>

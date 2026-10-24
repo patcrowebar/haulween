@@ -1,7 +1,7 @@
 // Tonight's plan and progress, kept in this browser only (localStorage), so a reload or a
 // dropped connection never loses them and Night Mode reopens with no network at all.
-// The street data comes along too, for "Replan from here". If the phone has no room for it,
-// the plan is still kept and only replanning is off.
+// "Replan from here" uses the street data kept with the planned route (planStore.ts). If the
+// phone had no room for it, the plan is still kept and only replanning is off.
 
 import type { Segment } from '../route/optimize';
 import type { PlanOptions } from '../route/plan';
@@ -9,9 +9,9 @@ import { fmt24, type Schedule } from '../route/schedule';
 import { startTrack, type Track } from '../route/track';
 import type { NamedLine, OsmData, Pt } from '../route/types';
 import { isNum, withDefaults } from '../stored';
+import { loadStreets, saveStreets } from './planStore';
 
 const PLAN_KEY = 'haulween.night.plan';
-const DATA_KEY = 'haulween.night.data';
 const PROGRESS_KEY = 'haulween.night.progress';
 
 export type NightPlan = {
@@ -40,6 +40,8 @@ export type NightProgress = {
   earlier: { houses: number; streets: number };
   /** The demo's own clock (minutes), so the demo walk can run at 10x. */
   demoClock: number | null;
+  /** They set off before the planned start (moved along the route or checked off a street). */
+  startedEarly: boolean;
 };
 
 function read<T>(k: string): T | null {
@@ -97,33 +99,27 @@ export function toProgress(saved: unknown, plan: NightPlan): NightProgress | nul
 }
 
 export const loadNight = (): NightPlan | null => toNightPlan(read<unknown>(PLAN_KEY));
-export const loadNightData = (): OsmData | null => {
-  const d = withDefaults(read<unknown>(DATA_KEY), { streets: [] as OsmData['streets'], areas: [] as OsmData['areas'], sidewalks: [] as OsmData['sidewalks'] });
-  return d.streets.length ? d : null;
-};
+/** Street data for this plan's replans, from the copy kept with the planned route. */
+export const loadNightData = (plan: NightPlan): OsmData | null => loadStreets(plan.home);
 export const loadProgress = (plan: NightPlan): NightProgress | null => toProgress(read<unknown>(PROGRESS_KEY), plan);
 export const saveProgress = (p: NightProgress): boolean => write(PROGRESS_KEY, p);
 
 export const freshProgress = (plan: NightPlan, sound: boolean): NightProgress => ({
   track: startTrack(plan.segments.length), alerted: false, sound,
-  earlier: { houses: 0, streets: 0 }, demoClock: plan.demo ? plan.start : null,
+  earlier: { houses: 0, streets: 0 }, demoClock: plan.demo ? plan.start : null, startedEarly: false,
 });
 
 /** Keep a plan for tonight. Returns false if it couldn't be kept at all. */
 export function saveNight(plan: NightPlan, data: OsmData | null, progress: NightProgress): boolean {
   if (!write(PLAN_KEY, plan)) return false;
-  if (data) {
-    // Busy roads and streets are all the replan needs; sidewalks only shade the map.
-    if (!write(DATA_KEY, { ...data, sidewalks: [] })) {
-      try { localStorage.removeItem(DATA_KEY); } catch { /* nothing kept */ }
-    }
-  }
+  if (data && !loadStreets(plan.home)) saveStreets(plan.home, data); // usually kept already, when planned
   return saveProgress(progress);
 }
 
 export function forgetNight(): void {
   try {
-    for (const k of [PLAN_KEY, DATA_KEY, PROGRESS_KEY]) localStorage.removeItem(k);
+    // The street data stays: it belongs to the planned route too.
+    for (const k of [PLAN_KEY, PROGRESS_KEY]) localStorage.removeItem(k);
   } catch {
     // no storage: nothing kept
   }
