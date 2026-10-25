@@ -24,7 +24,7 @@ function memoryStorage(limit = Infinity): Storage {
   };
 }
 
-const form = { ...DEFAULT_FORM, address: PLACEHOLDER_ADDRESS, date: '2026-10-31', start: '17:00', end: '21:00', ages: '10' };
+const form = { ...DEFAULT_FORM, address: PLACEHOLDER_ADDRESS, date: '2026-10-31', start: '17:00', end: '21:00' };
 const planned: Planned = { v: 1, form, home: HOME, title: 'Your route from Elm St, Springwood', tonight: null };
 const fetchSpy = vi.fn(() => { throw new Error('no network calls in these tests'); });
 
@@ -37,7 +37,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('a planned route, kept on this phone', () => {
   it('is kept when planned and comes back after a reload, the same route, with no fetch', () => {
-    const first = planOnce(SPRINGWOOD, HOME, form, 60);
+    const first = planOnce(SPRINGWOOD, HOME, form);
     if (!first.result.ok) throw new Error('plan failed');
     expect(savePlanned(planned, SPRINGWOOD)).toBe(true);
 
@@ -46,7 +46,7 @@ describe('a planned route, kept on this phone', () => {
     expect(back).not.toBeNull();
     expect(back!.planned.form).toEqual(form);
     expect(back!.planned.title).toBe(planned.title);
-    const again = planOnce(back!.data, back!.planned.home, back!.planned.form, 60);
+    const again = planOnce(back!.data, back!.planned.home, back!.planned.form);
     if (!again.result.ok) throw new Error('plan failed');
     expect(again.result.plan.segments).toEqual(first.result.plan.segments);
     expect(again.result.plan.schedule.rows).toEqual(first.result.plan.schedule.rows);
@@ -83,11 +83,11 @@ describe('a planned route, kept on this phone', () => {
 
   it('Night Mode replans from the same kept streets, with no second copy and no fetch', () => {
     savePlanned(planned, SPRINGWOOD);
-    const p = planOnce(SPRINGWOOD, HOME, form, 60);
+    const p = planOnce(SPRINGWOOD, HOME, form);
     if (!p.result.ok) throw new Error('plan failed');
     const night: NightPlan = {
       v: 1, title: planned.title, demo: false, date: form.date, home: HOME, start: parseClock(form.start),
-      options: { startTime: form.start, endTime: form.end, youngestAge: 10 },
+      options: { startTime: form.start, endTime: form.end, paceMph: 2.5, doorSeconds: 60 },
       segments: p.result.plan.segments, schedule: p.result.plan.schedule,
       lines: { streetLines: [], busyRoads: [], areas: [] },
     };

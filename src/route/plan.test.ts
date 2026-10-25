@@ -21,7 +21,7 @@ const segs = (p: ReturnType<typeof plan>) =>
   p.segments.map((s) => [s.name, s.pattern, s.lengthFt, s.housesLeft, s.housesRight]);
 
 describe('one hour with a 6-year-old (5 to 6 pm)', () => {
-  const p = plan({ startTime: '5:00pm', endTime: '6:00pm', youngestAge: 6 });
+  const p = plan({ startTime: '5:00pm', endTime: '6:00pm', paceMph: 2.0, doorSeconds: 60 });
 
   it('matches the reference walk', () => {
     expect(segs(p)).toEqual([
@@ -48,7 +48,7 @@ describe('one hour with a 6-year-old (5 to 6 pm)', () => {
 });
 
 describe('three hours with a 10-year-old (5 to 8 pm)', () => {
-  const p = plan({ startTime: '5:00pm', endTime: '8:00pm', youngestAge: 10 });
+  const p = plan({ startTime: '5:00pm', endTime: '8:00pm', paceMph: 2.5, doorSeconds: 60 });
 
   it('matches the reference walk and schedule', () => {
     expect(segs(p)).toEqual([
@@ -86,7 +86,7 @@ describe('three hours with a 10-year-old (5 to 8 pm)', () => {
 
 describe('one hour at 30 seconds a door', () => {
   it('matches the reference, with more houses than at 60 seconds', () => {
-    const p = plan({ startTime: '5:00pm', endTime: '6:00pm', youngestAge: 10, doorSeconds: 30 });
+    const p = plan({ startTime: '5:00pm', endTime: '6:00pm', paceMph: 2.5, doorSeconds: 30 });
     expect(rows(p)).toEqual([
       ['5:00', 'Elm St to Walnut St', 'zigzag', 9, 9],
       ['5:08', 'Walnut St to Maple Ave', 'zigzag', 10, 9],
@@ -101,7 +101,7 @@ describe('one hour at 30 seconds a door', () => {
 
 describe('45 minutes with a 4-year-old, skipping Maple Ave', () => {
   it('matches the reference and never uses Maple Ave', () => {
-    const p = plan({ startTime: '5:00pm', endTime: '5:45pm', youngestAge: 4, exclude: ['Maple Ave'] });
+    const p = plan({ startTime: '5:00pm', endTime: '5:45pm', paceMph: 1.5, exclude: ['Maple Ave'], doorSeconds: 60 });
     expect(rows(p)).toEqual([
       ['5:00', 'Elm St to Birch St', 'right side now, the other side on the way back', 11, 17],
       ['5:17', 'Elm St back home', 'back along the other side', 10, 16],
@@ -113,10 +113,10 @@ describe('45 minutes with a 4-year-old, skipping Maple Ave', () => {
 
 describe('rules every plan keeps', () => {
   const windows: PlanOptions[] = [
-    { startTime: '5:00pm', endTime: '6:00pm', youngestAge: 6 },
-    { startTime: '5:00pm', endTime: '8:00pm', youngestAge: 10 },
-    { startTime: '6:00pm', endTime: '7:30pm', youngestAge: 3, stroller: true },
-    { startTime: '17:00', endTime: '21:00', youngestAge: 13, doorSeconds: 35 },
+    { startTime: '5:00pm', endTime: '6:00pm', paceMph: 2.0, doorSeconds: 60 },
+    { startTime: '5:00pm', endTime: '8:00pm', paceMph: 2.5, doorSeconds: 60 },
+    { startTime: '6:00pm', endTime: '7:30pm', paceMph: 1.2, doorSeconds: 60 },
+    { startTime: '17:00', endTime: '21:00', paceMph: 3.0, doorSeconds: 35 },
   ];
 
   it.each(windows)('fits the window and passes the route check (%o)', (o) => {
@@ -146,13 +146,13 @@ describe('rules every plan keeps', () => {
   });
 
   it('never reaches Lakeview Dr, which is only past a yard', () => {
-    const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '10:00pm', youngestAge: 13 });
+    const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '10:00pm', paceMph: 3.0, doorSeconds: 60 });
     if (!r.ok) throw new Error('plan failed');
     expect(r.plan.segments.some((s) => s.name.startsWith('Lakeview'))).toBe(false);
   });
 
   it('turns a no-house connector into a walk-through', () => {
-    const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '6:00pm', youngestAge: 6 });
+    const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '6:00pm', paceMph: 2.0, doorSeconds: 60 });
     if (!r.ok) throw new Error('plan failed');
     const back = r.plan.segments[r.plan.segments.length - 1];
     expect(back).toMatchObject({ pattern: 'walk_through', housesLeft: 0, housesRight: 0 });
@@ -175,7 +175,7 @@ describe('a street the walk cannot reach', () => {
         ...far.map((s) => ({ ...pocket.pocket[0], name: s.name, pieces: [s.points] })),
       ],
     };
-    const o = { startTime: '5:00pm', endTime: '6:00pm', youngestAge: 6 };
+    const o = { startTime: '5:00pm', endTime: '6:00pm', paceMph: 2.0, doorSeconds: 60 };
     const planner = new Planner(buildGraph(SPRINGWOOD, loose, HOME), { ...paceFor(o), budget: budgetFor(o) });
     const { worked, minutes } = planner.optimize();
     expect(minutes).toBeLessThanOrEqual(50);
@@ -188,9 +188,9 @@ describe('Mill Rd: two safe streets that meet across a busy road', () => {
   const mill = findPocket(SPRINGWOOD_MILL_RD, HOME);
   const MILL_RD = ft(700, 300);
   const windows: PlanOptions[] = [
-    { startTime: '5:00pm', endTime: '10:00pm', youngestAge: 13 },
-    { startTime: '5:00pm', endTime: '8:00pm', youngestAge: 10 },
-    { startTime: '5:00pm', endTime: '6:30pm', youngestAge: 6 },
+    { startTime: '5:00pm', endTime: '10:00pm', paceMph: 3.0, doorSeconds: 60 },
+    { startTime: '5:00pm', endTime: '8:00pm', paceMph: 2.5, doorSeconds: 60 },
+    { startTime: '5:00pm', endTime: '6:30pm', paceMph: 2.0, doorSeconds: 60 },
   ];
 
   it('keeps both streets in the safe area', () => {

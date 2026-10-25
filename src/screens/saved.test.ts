@@ -10,7 +10,8 @@ import { checkRoute } from '../route/check';
 import { planRoute } from '../route/plan';
 import { replanFromHere } from '../route/replan';
 import { parseClock } from '../route/schedule';
-import { freshProgress, toNightPlan, toProgress, type NightPlan } from './nightStore';
+import { timeline } from '../route/status';
+import { freshProgress, makeNightPlan, toNightPlan, toProgress, type NightPlan } from './nightStore';
 import { PLAN_FAILED, PlainError, plainMessage } from './planner';
 import { DEFAULT_FORM, makePlan, routeTitle, toForm } from './planning';
 
@@ -50,19 +51,36 @@ describe('settings saved by an older version', () => {
     expect(out.result.ok).toBe(true);
   });
 
-  it('fills in every field a saved form is missing, then plans', () => {
+  it('fills in every field a saved form is missing, drops the ages, then plans', () => {
     const f = toForm(oldForm);
-    expect(f).toEqual({ ...DEFAULT_FORM, ...oldForm });
-    expect(f.avoid).toBe('');
-    expect(f.stroller).toBe(false);
+    const { ages: _ages, ...rest } = oldForm;
+    expect(f).toEqual({ ...DEFAULT_FORM, ...rest });
+    expect(f).not.toHaveProperty('ages');
+    expect(f).not.toHaveProperty('stroller');
     const out = makePlan(SPRINGWOOD, HOME, f);
     if (!out.result.ok) throw new Error('plan failed');
-    expect(out.estimates?.[0].houses).toBeGreaterThan(0);
+    expect(out.doors[0].houses).toBeGreaterThan(0);
+  });
+
+  it('an old stroller becomes Slow; otherwise Steady', () => {
+    expect(toForm({ ...oldForm, ages: '3, 6', stroller: true }).pace).toBe('slow');
+    expect(toForm({ ...oldForm, ages: '3, 6', stroller: false }).pace).toBe('steady');
+    expect(toForm({ ...oldForm, ages: '15' }).pace).toBe('steady');
+  });
+
+  it("keeps an old door time only where the parent could pick one (youngest 10 or older)", () => {
+    expect(toForm({ ...oldForm, ages: '6', doorSeconds: 60 }).doorSeconds).toBe(45); // 60 was forced, not chosen
+    expect(toForm({ ...oldForm, ages: '12', doorSeconds: 35 }).doorSeconds).toBe(35);
+    expect(toForm({ ...oldForm, ages: '12', doorSeconds: 60 }).doorSeconds).toBe(60);
+  });
+
+  it('keeps a pace and door time saved by this version', () => {
+    expect(toForm({ ...DEFAULT_FORM, pace: 'quick', doorSeconds: 30 })).toMatchObject({ pace: 'quick', doorSeconds: 30 });
   });
 
   it('replaces fields saved as null or the wrong type', () => {
-    const f = toForm({ ...oldForm, avoid: null, stroller: 'no', doorSeconds: 999, ages: 10 });
-    expect(f).toMatchObject({ avoid: '', stroller: false, doorSeconds: 60, ages: DEFAULT_FORM.ages });
+    const f = toForm({ ...oldForm, avoid: null, stroller: 'no', doorSeconds: 999, ages: 10, pace: 'sprint' });
+    expect(f).toMatchObject({ avoid: '', doorSeconds: 45, pace: 'steady' });
     for (const junk of [null, 'oops', 42, [1, 2]]) expect(toForm(junk)).toEqual(DEFAULT_FORM);
   });
 
@@ -78,7 +96,7 @@ describe('settings saved by an older version', () => {
 });
 
 describe('a Night Mode plan saved by an older version', () => {
-  const opts = { startTime: '17:00', endTime: '21:00', youngestAge: 10 };
+  const opts = { startTime: '17:00', endTime: '21:00', paceMph: 2.5, doorSeconds: 60 };
   const r = planRoute(SPRINGWOOD, HOME, opts);
   if (!r.ok) throw new Error('plan failed');
   const night: NightPlan = {
@@ -86,6 +104,18 @@ describe('a Night Mode plan saved by an older version', () => {
     start: parseClock(opts.startTime), segments: r.plan.segments, schedule: r.plan.schedule,
     lines: { streetLines: r.plan.pocket.streetLines, busyRoads: r.plan.pocket.busyRoads, areas: r.plan.pocket.areas },
   };
+
+  it('turns an old saved age and stroller into a pace, and replans at that pace', () => {
+    const old = JSON.parse(JSON.stringify({ ...night, options: { startTime: '17:00', endTime: '21:00', youngestAge: 4, stroller: true } }));
+    const p = toNightPlan(old)!;
+    expect(p.options).toMatchObject({ paceMph: 1.5, doorSeconds: 60 }); // door time from the saved schedule
+    expect(p.options).not.toHaveProperty('youngestAge');
+    const res = replanFromHere(SPRINGWOOD, p.home, { ...p.options, now: 19 * 60 }, { row: p.segments[2], at: null }, []);
+    if (!res.ok) throw new Error(res.problems.join('; '));
+    expect(res.plan.schedule.pace).toEqual({ mph: 1.5, doorSeconds: 60 });
+    const steady = toNightPlan(JSON.parse(JSON.stringify({ ...night, options: { startTime: '17:00', endTime: '21:00', youngestAge: 13 } })))!;
+    expect(steady.options.paceMph).toBe(2.0);
+  });
 
   it('fills in missing settings, and a replan from it still passes the route check', () => {
     const { options: _o, lines: _l, title: _t, ...old } = night;
@@ -124,5 +154,35 @@ describe('error messages on screen', () => {
   it('shows messages written for a parent as they are', () => {
     expect(plainMessage(new ServiceError('The street map service is busy.'))).toBe('The street map service is busy.');
     expect(plainMessage(new PlainError('Planning took too long.'))).toBe('Planning took too long.');
+  });
+});
+
+describe('Night Mode uses the chosen pace and door time', () => {
+  const base = { ...DEFAULT_FORM, address: PLACEHOLDER_ADDRESS, date: '2026-10-31', start: '17:00', end: '20:00' };
+  const nightFor = (pace: 'slow' | 'fast', doorSeconds: number) => {
+    const f = { ...base, pace, doorSeconds };
+    const out = makePlan(SPRINGWOOD, HOME, f);
+    if (!out.result.ok) throw new Error('plan failed');
+    return makeNightPlan({ title: 'Your route from Elm St', demo: false, home: HOME }, f, out.result.plan, out.avoid.exclude);
+  };
+
+  it("Night Mode's timing is the chosen plan's", () => {
+    const slow = nightFor('slow', 60), fast = nightFor('fast', 30);
+    expect(slow.options).toMatchObject({ paceMph: 1.5, doorSeconds: 60 });
+    expect(fast.options).toMatchObject({ paceMph: 3.0, doorSeconds: 30 });
+    expect(slow.schedule.pace).toEqual({ mph: 1.5, doorSeconds: 60 });
+    // The street-by-street times Night Mode tracks against come from that schedule.
+    const tl = timeline(slow.schedule, slow.start);
+    expect(tl.rows[1].start).toBe(parseClock(slow.schedule.rows[1].t24));
+  });
+
+  it('"Replan from here" keeps the chosen pace and door time', () => {
+    for (const night of [nightFor('slow', 60), nightFor('fast', 30)]) {
+      const res = replanFromHere(SPRINGWOOD, night.home, { ...night.options, now: 18 * 60 }, { row: night.segments[1], at: null },
+        [{ points: night.segments[0].points, pattern: night.segments[0].pattern }]);
+      if (!res.ok) throw new Error(res.problems.join('; '));
+      expect(res.plan.schedule.pace).toEqual({ mph: night.options.paceMph, doorSeconds: night.options.doorSeconds });
+      expect(checkRoute(res.plan.pocket, res.plan.segments, HOME)).toEqual([]);
+    }
   });
 });

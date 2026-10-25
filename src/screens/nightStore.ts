@@ -5,11 +5,14 @@
 
 import type { Segment } from '../route/optimize';
 import type { PlanOptions } from '../route/plan';
-import { fmt24, type Schedule } from '../route/schedule';
+import type { Plan } from '../route/plan';
+import { fmt24, parseClock, type Schedule } from '../route/schedule';
 import { startTrack, type Track } from '../route/track';
 import type { NamedLine, OsmData, Pt } from '../route/types';
 import { isNum, withDefaults } from '../stored';
+import { DEFAULT_DOOR_SECONDS, DEFAULT_PACE, paceChoice } from '../config';
 import { loadStreets, saveStreets } from './planStore';
+import type { PlanForm } from './planning';
 
 const PLAN_KEY = 'haulween.night.plan';
 const PROGRESS_KEY = 'haulween.night.progress';
@@ -76,9 +79,14 @@ export function toNightPlan(saved: unknown): NightPlan | null {
   const schedule = typeof s.schedule === 'object' && s.schedule !== null ? (s.schedule as Schedule) : null;
   if (!p.segments.length || !schedule || !Array.isArray(schedule.rows) || schedule.rows.length !== p.segments.length
     || p.home.length !== 2 || !isNum(p.start) || !/^\d{4}-\d{2}-\d{2}$/.test(p.date)) return null;
+  // Older versions saved the kids' youngest age and a stroller flag instead of a pace: a stroller
+  // means Slow, otherwise Steady (the ages are dropped). Their door time is in the schedule.
+  const rawOptions = (typeof p.options === 'object' && p.options !== null ? p.options : {}) as Record<string, unknown>;
+  const oldPace = rawOptions.stroller === true ? paceChoice('slow').mph : paceChoice(DEFAULT_PACE).mph;
   const options = withDefaults(p.options, {
     startTime: fmt24(p.start), endTime: typeof schedule.windowEnd24 === 'string' ? schedule.windowEnd24 : '20:00',
-    youngestAge: 8, stroller: false, doorSeconds: 60, exclude: [] as string[],
+    paceMph: oldPace, doorSeconds: isNum(schedule.pace?.doorSeconds) ? schedule.pace.doorSeconds : DEFAULT_DOOR_SECONDS,
+    exclude: [] as string[],
   });
   const lines = withDefaults(p.lines, { streetLines: [] as NamedLine[], busyRoads: [] as NamedLine[], areas: [] as NamedLine[] });
   return { ...p, v: 1, schedule, options, lines };
@@ -108,6 +116,26 @@ export const freshProgress = (plan: NightPlan, sound: boolean): NightProgress =>
   track: startTrack(plan.segments.length), alerted: false, sound,
   earlier: { houses: 0, streets: 0 }, demoClock: plan.demo ? plan.start : null, startedEarly: false,
 });
+
+/**
+ * Tonight's plan from a planned route. Night Mode's timing comes from this schedule, and its
+ * replans use the same pace and door time, so they all match what the parent chose.
+ */
+export function makeNightPlan(
+  from: { title: string; demo: boolean; home: Pt }, form: PlanForm, plan: Plan, exclude: string[],
+): NightPlan {
+  return {
+    v: 1, title: from.title, demo: from.demo, date: form.date, home: from.home,
+    options: {
+      startTime: form.start, endTime: form.end, paceMph: paceChoice(form.pace).mph,
+      doorSeconds: form.doorSeconds, exclude,
+    },
+    start: parseClock(form.start),
+    segments: plan.segments,
+    schedule: plan.schedule,
+    lines: { streetLines: plan.pocket.streetLines, busyRoads: plan.pocket.busyRoads, areas: plan.pocket.areas },
+  };
+}
 
 /** Keep a plan for tonight. Returns false if it couldn't be kept at all. */
 export function saveNight(plan: NightPlan, data: OsmData | null, progress: NightProgress): boolean {

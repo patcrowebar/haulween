@@ -1,22 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { fmtClock, paceForAge, parseClock } from './schedule';
+import { fmtClock, paceFor, parseClock } from './schedule';
 
-describe('paceForAge', () => {
-  it('matches the reference pace table', () => {
-    expect(paceForAge(2)).toBe(1.2);
-    expect(paceForAge(3)).toBe(1.2);
-    expect(paceForAge(4)).toBe(1.5);
-    expect(paceForAge(5)).toBe(1.5);
-    expect(paceForAge(8)).toBe(2.0);
-    expect(paceForAge(9)).toBe(2.5);
-    expect(paceForAge(12)).toBe(2.5);
-    expect(paceForAge(13)).toBe(3.0);
-    expect(paceForAge(40)).toBe(3.0);
-  });
-
-  it('caps the pace at 2 mph with a stroller', () => {
-    expect(paceForAge(13, true)).toBe(2.0);
-    expect(paceForAge(4, true)).toBe(1.5);
+describe('pace and door defaults', () => {
+  it('plans at Steady (2.0 mph) and 45 seconds a door unless told otherwise', () => {
+    expect(paceFor({ startTime: '17:00', endTime: '20:00' })).toMatchObject({ mph: 2.0, doorMin: 0.75 });
+    expect(paceFor({ startTime: '17:00', endTime: '20:00', paceMph: 1.5, doorSeconds: 30 })).toMatchObject({ mph: 1.5, doorMin: 0.5 });
   });
 });
 

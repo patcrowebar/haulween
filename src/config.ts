@@ -6,10 +6,21 @@ export const CLAUDE_MODEL = 'claude-sonnet-5-5';
 /** Placeholder address for examples, tests and screenshots. Never use a real one. */
 export const PLACEHOLDER_ADDRESS = '1428 Elm St, Springwood, OH';
 
-export const DEFAULT_DOOR_SECONDS = 60;
+/** Door time and walking pace are the main settings; every choice is always shown. */
+export const DEFAULT_DOOR_SECONDS = 45;
 export const DOOR_SECONDS_CHOICES = [60, 45, 35, 30] as const;
-/** Ask about door time when the youngest walker is this age or older. */
-export const ASK_DOOR_TIME_FROM_AGE = 10;
+
+/** Walking pace between doors. Shown by label and description only, never mph. */
+export const PACE_CHOICES = [
+  { id: 'slow', label: 'Slow', description: 'little ones or a stroller', mph: 1.5 },
+  { id: 'steady', label: 'Steady', description: 'most kids', mph: 2.0 },
+  { id: 'quick', label: 'Quick', description: 'big kids', mph: 2.5 },
+  { id: 'fast', label: 'Fast', description: 'teens', mph: 3.0 },
+] as const;
+export type PaceId = (typeof PACE_CHOICES)[number]['id'];
+export const DEFAULT_PACE: PaceId = 'steady';
+export const paceChoice = (id: PaceId) => PACE_CHOICES.find((p) => p.id === id) ?? PACE_CHOICES[1];
+export const isPaceId = (v: unknown): v is PaceId => PACE_CHOICES.some((p) => p.id === v);
 export const DEFAULT_LOT_WIDTH_FT = 55;
 export const DEFAULT_BUFFER_MIN = 10;
 /** Overpass gets the home point rounded to this many decimals (about 100 m). */

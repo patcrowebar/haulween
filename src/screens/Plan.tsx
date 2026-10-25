@@ -1,20 +1,18 @@
 // The Plan screen: where you live, when you're going, who's walking. Then the route.
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { DOOR_SECONDS_CHOICES, PLACEHOLDER_ADDRESS } from '../config';
+import { PLACEHOLDER_ADDRESS } from '../config';
 import { FallbackGeocoder, type Place } from '../data/geocoder';
 import { OverpassClient, type Attempt } from '../data/overpass';
 import { WeatherClient, type Tonight } from '../data/weather';
 import type { OsmData, Pt } from '../route/types';
 import Results from './Results';
-import { freshProgress, loadNight, saveNight, type NightPlan } from './nightStore';
+import { freshProgress, loadNight, makeNightPlan, saveNight } from './nightStore';
 import { loadPlanned, plannedFor, savePlanned, updatePlanned } from './planStore';
 import { Planner, isCancelled, plainMessage } from './planner';
 import {
-  DEFAULT_FORM, asksDoorTime, doorEstimate, doorSecondsFor, routeTitle, toForm, youngestAge, type PlanForm, type PlanOnce,
-  type PlanOutcome,
+  DEFAULT_FORM, choiceKey, estimatesFor, routeTitle, toForm, type PlanForm, type PlanOnce, type PlanOutcome,
 } from './planning';
-import { parseClock } from '../route/schedule';
 
 const FORM_KEY = 'haulween.form';
 const geocoder = new FallbackGeocoder();
@@ -64,12 +62,16 @@ export default function Plan({ onNight }: { onNight: () => void }) {
   const [weatherNote, setWeatherNote] = useState<string | null>(null);
   const [credit, setCredit] = useState(geocoder.current.credit);
   const lastPlace = useRef<{ address: string; place: Place } | null>(null);
-  /** Plans already worked out for this address and these answers, by door time. */
-  const byDoor = useRef(new Map<number, PlanOnce>());
+  /** Plans already worked out for this address and these answers, by door time and pace. */
+  const plans = useRef(new Map<string, PlanOnce>());
   const generation = useRef(0);
   const lastTap = useRef(0);
-  /** The door time being planned after a tap, for its "planning…" label. */
-  const [pendingDoor, setPendingDoor] = useState<number | null>(null);
+  /** The choice being planned after a tap (its choiceKey), for its "planning…" label. */
+  const [pending, setPending] = useState<string | null>(null);
+  /** The form as it is now, for estimates worked out after a later tap. */
+  const formRef = useRef(form);
+  formRef.current = form;
+  const known = (k: string) => plans.current.get(k)?.result;
   const resultsRef = useRef<HTMLDivElement>(null);
   const [saved] = useState(() => loadNight());
   const [startError, setStartError] = useState<string | null>(null);
@@ -77,25 +79,18 @@ export default function Plan({ onNight }: { onNight: () => void }) {
   const [keepNote, setKeepNote] = useState<string | null>(null);
 
   const set = <K extends keyof PlanForm>(k: K, v: PlanForm[K]) => setForm((f) => ({ ...f, [k]: v }));
-  const youngest = youngestAge(form.ages);
 
-  /** Plan at the chosen door time and show it. Other door times are planned only when tapped. */
+  /** Plan at the chosen door time and pace and show it. Other choices are planned when tapped. */
   async function show(next: Found, f: PlanForm): Promise<PlanOnce | null> {
     planner.cancel();
     const gen = ++generation.current;
-    byDoor.current = new Map();
-    setPendingDoor(null);
-    const door = doorSecondsFor(f);
-    const main = await planner.run(next.data, next.home, f, door);
+    plans.current = new Map();
+    setPending(null);
+    const main = await planner.run(next.data, next.home, f);
     if (gen !== generation.current) return null;
-    byDoor.current.set(door, main);
+    plans.current.set(choiceKey(f), main);
     setFound(next);
-    setOutcome({
-      ...main,
-      estimates: asksDoorTime(main.youngest)
-        ? DOOR_SECONDS_CHOICES.map((s) => (s === door ? doorEstimate(s, main.result) : { seconds: s, houses: undefined }))
-        : null,
-    });
+    setOutcome({ ...main, ...estimatesFor(f, known) });
     if (!main.result.ok) setError(NO_ROUTE);
     return main;
   }
@@ -108,12 +103,8 @@ export default function Plan({ onNight }: { onNight: () => void }) {
 
   async function plan(f: PlanForm, asDemo: boolean) {
     setError(null);
-    if (youngestAge(f.ages) === null) {
-      setError('Add the kids’ ages, like “6, 9”.');
-      return;
-    }
     if (!asDemo && !f.address.trim()) {
-      setError('Add your home address, or try the demo.');
+      setError('Add your starting address, or try the demo.');
       return;
     }
     setStatus('working');
@@ -233,8 +224,13 @@ export default function Plan({ onNight }: { onNight: () => void }) {
     reopen();
   }
 
-  async function chooseDoor(seconds: number) {
-    const f = { ...form, doorSeconds: seconds };
+  /**
+   * A tap on a door time or a pace. Shows that plan, working it out first if it's new. Each
+   * section's estimates are always for the other section's current choice.
+   */
+  async function choose(patch: Partial<Pick<PlanForm, 'doorSeconds' | 'pace'>>) {
+    const f = { ...formRef.current, ...patch };
+    formRef.current = f;
     setForm(f);
     if (!demo) {
       saveForm(f);
@@ -243,24 +239,27 @@ export default function Plan({ onNight }: { onNight: () => void }) {
     if (!found) return;
     const gen = generation.current;
     const tap = ++lastTap.current;
-    let p = byDoor.current.get(seconds);
+    const key = choiceKey(f);
+    // Show what's already known for the new combination at once.
+    setOutcome((o) => (o ? { ...o, ...estimatesFor(f, known) } : o));
+    let p = plans.current.get(key);
     if (!p) {
-      setPendingDoor(seconds);
+      setPending(key);
       let failed: string | null = null;
-      p = await planner.run(found.data, found.home, f, seconds).catch((e: unknown) => {
+      p = await planner.run(found.data, found.home, f).catch((e: unknown) => {
         failed = isCancelled(e) ? 'cancelled' : plainMessage(e);
         return undefined;
       });
-      if (tap === lastTap.current) setPendingDoor(null);
+      if (tap === lastTap.current) setPending(null);
       if (failed && failed !== 'cancelled' && gen === generation.current && tap === lastTap.current) setError(failed);
       if (!p || gen !== generation.current) return;
-      byDoor.current.set(seconds, p);
+      plans.current.set(key, p);
     }
     const done = p;
     setOutcome((o) => {
       if (!o) return o;
-      const estimates = o.estimates?.map((e) => (e.seconds === seconds ? doorEstimate(seconds, done.result) : e)) ?? null;
-      return tap === lastTap.current ? { ...done, estimates } : { ...o, estimates };
+      const estimates = estimatesFor(formRef.current, known);
+      return tap === lastTap.current ? { ...done, ...estimates } : { ...o, ...estimates };
     });
     if (tap === lastTap.current) setError(done.result.ok ? null : NO_ROUTE);
   }
@@ -285,19 +284,7 @@ export default function Plan({ onNight }: { onNight: () => void }) {
   /** Save the plan on this phone and open Night Mode. */
   function startNight(sound: boolean) {
     if (!found || !outcome?.result.ok) return;
-    const p = outcome.result.plan;
-    const door = doorSecondsFor(form);
-    const night: NightPlan = {
-      v: 1, title: found.title, demo: found.demo, date: form.date, home: found.home,
-      options: {
-        startTime: form.start, endTime: form.end, youngestAge: outcome.youngest, stroller: form.stroller,
-        doorSeconds: door, exclude: outcome.avoid.exclude,
-      },
-      start: parseClock(form.start),
-      segments: p.segments,
-      schedule: p.schedule,
-      lines: { streetLines: p.pocket.streetLines, busyRoads: p.pocket.busyRoads, areas: p.pocket.areas },
-    };
+    const night = makeNightPlan(found, form, outcome.result.plan, outcome.avoid.exclude);
     if (!saveNight(night, found.data, freshProgress(night, sound))) {
       setStartError("This phone wouldn't let Haulween save the plan, so Night Mode can't start. Check that private browsing is off.");
       return;
@@ -333,7 +320,7 @@ export default function Plan({ onNight }: { onNight: () => void }) {
 
       <form className="panel form" onSubmit={onSubmit} noValidate>
         <label className="field">
-          <span>Home address</span>
+          <span>Starting address</span>
           <input
             type="text" value={form.address} placeholder={PLACEHOLDER_ADDRESS} autoComplete="street-address"
             readOnly={demo} onChange={(e) => set('address', e.target.value)}
@@ -355,26 +342,6 @@ export default function Plan({ onNight }: { onNight: () => void }) {
             <input type="time" value={form.end} step={300} onChange={(e) => set('end', e.target.value)} />
           </label>
         </div>
-
-        <label className="field">
-          <span>Kids’ ages</span>
-          <input
-            type="text" inputMode="text" value={form.ages} placeholder="6, 9"
-            onChange={(e) => set('ages', e.target.value)}
-          />
-          <small className="muted">
-            {youngest === null
-              ? 'The youngest sets the pace.'
-              : asksDoorTime(youngest)
-                ? `Youngest is ${youngest}. You'll pick how long you spend at each door.`
-                : `Youngest is ${youngest}, so we'll plan about a minute a door.`}
-          </small>
-        </label>
-
-        <label className="check">
-          <input type="checkbox" checked={form.stroller} onChange={(e) => set('stroller', e.target.checked)} />
-          <span>Bringing a stroller or wagon</span>
-        </label>
 
         <label className="field">
           <span>Roads to avoid <span className="muted">(optional)</span></span>
@@ -410,7 +377,7 @@ export default function Plan({ onNight }: { onNight: () => void }) {
         {found && outcome?.result.ok && (
           <Results
             outcome={outcome} plan={outcome.result.plan} form={form} title={found.title}
-            demo={found.demo} tonight={tonight} weatherNote={weatherNote} onDoor={chooseDoor} pendingDoor={pendingDoor}
+            demo={found.demo} tonight={tonight} weatherNote={weatherNote} onChoose={choose} pending={pending}
             onStartNight={startNight}
           />
         )}

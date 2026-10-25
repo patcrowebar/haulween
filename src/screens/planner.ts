@@ -34,7 +34,7 @@ const KNOWN: Record<string, string> = {
 
 /** Turns an internal error into something a parent can act on. */
 export function friendlyPlanError(message: string): string {
-  if (message === 'cancelled' || message.startsWith('Add the kids')) return message;
+  if (message === 'cancelled') return message;
   return KNOWN[message] ?? PLAN_FAILED;
 }
 
@@ -90,8 +90,9 @@ export class Planner {
     }
   }
 
-  run(data: OsmData, home: Pt, form: PlanForm, doorSeconds: number): Promise<PlanOnce> {
-    return this.call({ kind: 'plan', data, home, form, doorSeconds }) as Promise<PlanOnce>;
+  /** A plan at the form's door time and pace. */
+  run(data: OsmData, home: Pt, form: PlanForm): Promise<PlanOnce> {
+    return this.call({ kind: 'plan', data, home, form }) as Promise<PlanOnce>;
   }
 
   /** Night Mode's "Replan from here". */

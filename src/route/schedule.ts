@@ -9,25 +9,15 @@ import { pyRound } from './geo';
 import type { Segment } from './optimize';
 import type { Pt } from './types';
 
-// Youngest walker -> walking pace in mph, between doors (not counting door stops).
-// Deliberately slow: costumes, dark, excitement, stopping to compare candy.
-const PACE_BY_AGE: ReadonlyArray<[maxAge: number, mph: number]> = [
-  [3, 1.2], // 3 and under (walking, not riding)
-  [5, 1.5], // 4-5
-  [8, 2.0], // 6-8
-  [12, 2.5], // 9-12
-  [99, 3.0], // 13+
-];
+// Walking pace is a setting the parent picks (Slow, Steady, Quick, Fast), in mph between doors,
+// not counting door stops. The reference guessed it from the youngest walker's age; Haulween no
+// longer asks ages. Deliberately slow: costumes, dark, excitement, stopping to compare candy.
 
-/** A stroller or wagon caps the pace. */
-export const STROLLER_MAX_MPH = 2.0;
+/** Steady: most kids. */
+export const DEFAULT_PACE_MPH = 2.0;
+/** 45 seconds a door. */
+export const DEFAULT_DOOR_SECONDS = 45;
 export const FT_PER_MILE = 5280;
-
-export function paceForAge(age: number, stroller = false): number {
-  const row = PACE_BY_AGE.find(([maxAge]) => age <= maxAge);
-  const mph = row ? row[1] : 3.0;
-  return stroller ? Math.min(mph, STROLLER_MAX_MPH) : mph;
-}
 
 /** Reads "17:00", "5:00pm", "5pm" or "5:30 PM" as minutes after midnight. */
 export function parseClock(text: string): number {
@@ -58,8 +48,7 @@ export function fmt24(minutes: number): string {
 export type ScheduleOptions = {
   startTime: string;
   endTime: string;
-  youngestAge: number;
-  stroller?: boolean;
+  /** Walking pace between doors. */
   paceMph?: number;
   doorSeconds?: number;
   crossSeconds?: number;
@@ -108,12 +97,11 @@ export type Schedule = {
 export type Pace = { mph: number; ftPerMin: number; doorMin: number; crossMin: number; housesPerCrossing: number };
 
 export function paceFor(o: ScheduleOptions): Pace {
-  let mph = o.paceMph || paceForAge(o.youngestAge);
-  if (o.stroller) mph = Math.min(mph, STROLLER_MAX_MPH);
+  const mph = o.paceMph || DEFAULT_PACE_MPH;
   return {
     mph,
     ftPerMin: (mph * FT_PER_MILE) / 60,
-    doorMin: (o.doorSeconds ?? 60) / 60,
+    doorMin: (o.doorSeconds ?? DEFAULT_DOOR_SECONDS) / 60,
     crossMin: (o.crossSeconds ?? 20) / 60,
     housesPerCrossing: o.housesPerCrossing ?? 2,
   };
@@ -177,7 +165,7 @@ export function makeSchedule(segments: Segment[], o: ScheduleOptions): Schedule 
   const headHome = t / US;
   const over = headHome - endMin; // a loop: head-home is home
   return {
-    pace: { mph: p.mph, doorSeconds: o.doorSeconds ?? 60 },
+    pace: { mph: p.mph, doorSeconds: o.doorSeconds ?? DEFAULT_DOOR_SECONDS },
     rows,
     headHome: fmtClock(headHome),
     latestHeadHome: fmtClock(endMin),

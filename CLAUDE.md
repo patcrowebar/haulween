@@ -66,7 +66,7 @@ These come from real bugs. Don't relax them without asking.
 2. **The safe pocket.** A street is usable only if you can reach it from home without stepping onto a busy road. Busy means OpenStreetMap `highway` is primary, secondary or trunk, or 3+ lanes, or posted 35 mph or more. Never route along a busy road. Crossing one is allowed only when the user asks.
 3. **The route check must pass before a route is shown.** Every stretch must lie on a real street line, every street must connect to the next, and no stretch may run along a busy road. If the check fails, fix the route. Don't display it with a warning.
 4. **Optimize; don't hand-pick.** The optimizer chooses the street pieces and their order. Fixed loops lost about 10% of the houses in testing.
-5. **Door time is the main setting.** The default is 60 seconds. When the youngest walker is 10 or older, ask, and show the house estimate for 60, 45, 35 and 30 seconds.
+5. **Door time and walking pace are the main settings.** Defaults: 45 seconds per door and Steady pace. Always show all choices with their house estimates, and let the parent choose. (Door: 60, 45, 35, 30 seconds. Pace: Slow, Steady, Quick, Fast, shown by name and description, never mph. Haulween doesn't ask the kids' ages.)
 6. **Patterns come from the walk:**
    - A street walked once is zigzagged.
    - A street walked twice is one side out and the other back.
@@ -96,6 +96,7 @@ The in-app AI guide is called **Jack**. He speaks in short, friendly lines, like
   - `exclude_street`
   - `include_street`
   - `set_door_seconds`
+  - `set_walking_pace`
   - `set_window`
   - `replan_from_here`
   - `explain_route`

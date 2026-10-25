@@ -14,7 +14,7 @@ const offLine = (pins: Pin[], segs: Segment[], home: [number, number]) => {
 };
 
 describe('placePins', () => {
-  const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '8:00pm', youngestAge: 10 });
+  const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '8:00pm', paceMph: 2.5, doorSeconds: 60 });
   if (!r.ok) throw new Error('plan failed');
   const segs = r.plan.segments;
   const home = routeLine(segs)[0];
@@ -54,7 +54,7 @@ describe('placeLabels', () => {
   const project = (p: [number, number]): [number, number] => [(p[1] + 82.1) * 70000 + 200, (41.8 - p[0]) * 90000 + 200];
 
   it('names each street once, inside the map, without touching a pin or another label', () => {
-    const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '8:00pm', youngestAge: 10 });
+    const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '8:00pm', paceMph: 2.5, doorSeconds: 60 });
     if (!r.ok) throw new Error('plan failed');
     const home = routeLine(r.plan.segments)[0];
     const pins = placePins(r.plan.segments, home).map((p) => project([p.lat, p.lng]));
@@ -80,7 +80,7 @@ describe('placeLabels', () => {
 
 describe('placePinsOnScreen', () => {
   it('keeps every pin off Home and off each other at the zoom the map opens at', () => {
-    const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '8:00pm', youngestAge: 10 });
+    const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '8:00pm', paceMph: 2.5, doorSeconds: 60 });
     if (!r.ok) throw new Error('plan failed');
     const route = routeLine(r.plan.segments);
     const home = route[0];
@@ -104,7 +104,7 @@ describe('placePinsOnScreen', () => {
   it('keeps every pin on its own street line, even when that street is crowded near Home', () => {
     // Pin 15 on a real route sat off the route near Home: its street had no clear spot, so it
     // was pushed onto a ring around the street's middle. Now it stays on the street.
-    const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '8:00pm', youngestAge: 10 });
+    const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '8:00pm', paceMph: 2.5, doorSeconds: 60 });
     if (!r.ok) throw new Error('plan failed');
     const home = routeLine(r.plan.segments)[0];
     for (const k of [8000, 15000, 40000, 90000]) {
@@ -118,7 +118,7 @@ describe('placePinsOnScreen', () => {
   });
 
   it('keeps a replan\'s short last stretch home on its street and off Home', () => {
-    const opts = { startTime: '17:00', endTime: '20:00', youngestAge: 10, doorSeconds: 45 };
+    const opts = { startTime: '17:00', endTime: '20:00', paceMph: 2.5, doorSeconds: 45 };
     const r = planRoute(SPRINGWOOD, HOME, opts);
     if (!r.ok) throw new Error('plan failed');
     const s = r.plan.segments;

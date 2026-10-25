@@ -34,7 +34,7 @@ The family walks out the door at 5:00 with a route they trust, hits the most hou
 
 > *One persona. Who they are, their tech comfort level, and the context they'll use the app in.*
 
-A parent of kids aged 4 to 15, comfortable with phone apps but not maps or settings. They plan on the couch a day or two before. On Halloween they're outside in the dark, holding a candy bag and their phone in one hand, glancing at it between houses.
+A parent of trick-or-treaters, from little ones to teens, comfortable with phone apps but not maps or settings. They plan on the couch a day or two before. On Halloween they're outside in the dark, holding a candy bag and their phone in one hand, glancing at it between houses.
 
 ---
 
@@ -42,8 +42,8 @@ A parent of kids aged 4 to 15, comfortable with phone apps but not maps or setti
 
 > *3–7 steps. The happy path from open to "win." Plain English.*
 
-1. Parent enters the home address, the time window ("5 to 8 pm"), the kids' ages, and any roads to avoid.
-2. Jack, the AI guide, asks one or two quick questions that change the plan, like how long the kids take per house or whether there's a stroller.
+1. Parent enters the starting address, the time window ("5 to 8 pm"), and any roads to avoid.
+2. The parent picks how long they'll spend at each door and how fast they walk, seeing the house estimate for every choice. Jack, the optional AI guide, can help with those and with odd cases.
 3. The app shows a real map with the route, numbered streets, a street-by-street schedule, the total houses, and the head-home time.
 4. Parent tweaks it ("skip Maple Ct", or taps a street to add it), and the route re-optimizes.
 5. On Halloween, the parent opens Night Mode. A GPS dot shows where they are, and a status bar says "On track" or "6 min behind".
@@ -76,7 +76,7 @@ No backend or server of any kind, no AI running on the maintainer's key, no acco
 
 > *Just the nouns and their key fields. Not a schema.*
 
-- **Plan** has a home point (snapped to its street), a time window, a date, the kids' ages, door seconds, pace, roads to avoid, stroller yes/no, and an ordered list of Segments.
+- **Plan** has a home point (snapped to its street), a time window, a date, door seconds, walking pace (Slow, Steady, Quick or Fast), roads to avoid, and an ordered list of Segments.
 - **Street piece** is a stretch between two intersections from OpenStreetMap. It has a name, its geometry, its length, and houses on the left and on the right (frontage minus parks, schools, churches and corners).
 - **Segment** is one row of the schedule. It has a street piece or pieces, a pattern (zigzag, one side, or walk-through), houses, a planned start time, a "skip if behind" flag, and done yes/no.
 - **Busy road** has a name and geometry, and is never walked along. Busy means primary, secondary or trunk, 3+ lanes, or posted 35 mph or more.
@@ -117,7 +117,7 @@ Halloween night: near-black backgrounds, pumpkin-orange route and buttons, a dar
   - **Weather and sunset:** Open-Meteo, which needs no key.
   - **Never bridge a gap in the street data.** A gap is a dead end, a park or a yard. Every route must pass a check that each stretch lies on a real street and never runs along a busy road.
   - **The safe pocket** is the set of streets reachable from home without stepping onto a busy road.
-  - **Defaults:** pace from the youngest walker (1.2 to 3.0 mph), about 60 seconds per door (ask when the youngest is 10 or older), a 10-minute buffer, and a loop that ends at home.
+  - **Defaults:** 45 seconds per door and a Steady pace (2.0 mph; the choices run 1.5 to 3.0), both always shown with every choice's house estimate for the parent to change, a 10-minute buffer, and a loop that ends at home.
   - **The app works fully with the AI off.**
   - **Bring-your-own-key AI:** the browser calls Claude directly using the `anthropic-dangerous-direct-browser-access` header. The key is kept only in the browser, never logged or sent anywhere else. Load no third-party scripts beyond the map libraries. Keep AI calls few and short.
   - **No secrets in the repo.**

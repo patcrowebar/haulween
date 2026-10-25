@@ -10,7 +10,7 @@ import { countdownText, hasStarted, nightStatus, setsOffEarly, timeline, turnAro
 import { GPS_ACCURACY_M, checkOff, onReading, pointAlong, startTrack, uncheck, type Reading, type Track } from './track';
 import type { Pt } from './types';
 
-const opts = { startTime: '17:00', endTime: '20:00', youngestAge: 10 };
+const opts = { startTime: '17:00', endTime: '20:00', paceMph: 2.5, doorSeconds: 60 };
 const r = planRoute(SPRINGWOOD, HOME, opts);
 if (!r.ok) throw new Error('plan failed');
 const plan = r.plan;

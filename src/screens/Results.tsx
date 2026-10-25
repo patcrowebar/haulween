@@ -4,7 +4,8 @@ import { Suspense, lazy, useState } from 'react';
 import type { Plan } from '../route/plan';
 import { nextStretchLink } from '../route/schedule';
 import { flagsFor, type Tonight } from '../data/weather';
-import { ampm, leftOut, patternText, type PlanForm, type PlanOutcome } from './planning';
+import { paceChoice } from '../config';
+import { ampm, choiceKey, leftOut, patternText, type Estimate, type PlanForm, type PlanOutcome } from './planning';
 
 // MapLibre is most of the app's size; load it once there's a route to draw.
 const RouteMap = lazy(() => import('../map/RouteMap'));
@@ -17,14 +18,19 @@ type Props = {
   demo: boolean;
   tonight: Tonight | null;
   weatherNote: string | null;
-  onDoor: (seconds: number) => void;
-  /** A door time that's being planned right now. */
-  pendingDoor: number | null;
+  /** A tap on a door time or a pace. */
+  onChoose: (patch: Partial<Pick<PlanForm, 'doorSeconds' | 'pace'>>) => void;
+  /** The choice being planned right now (its choiceKey). */
+  pending: string | null;
   /** Open Night Mode with this plan; `sound` is whether to beep at turn-around time. */
   onStartNight: (sound: boolean) => void;
 };
 
-export default function Results({ outcome, plan, form, title, demo, tonight, weatherNote, onDoor, pendingDoor, onStartNight }: Props) {
+/** "~152 houses", or why there's no number yet. */
+const housesText = (e: Estimate, planning: boolean) =>
+  planning ? 'planning…' : e.houses === undefined ? 'tap to see' : e.houses === null ? 'no route fits' : `~${e.houses} houses`;
+
+export default function Results({ outcome, plan, form, title, demo, tonight, weatherNote, onChoose, pending, onStartNight }: Props) {
   const { schedule, estimate, segments } = plan;
   const leg = schedule.lastLeg;
   const link = nextStretchLink(segments, 0);
@@ -59,31 +65,53 @@ export default function Results({ outcome, plan, form, title, demo, tonight, wea
         )}
       </div>
 
-      {outcome.estimates && (
-        <fieldset className="panel doors">
-          <legend>How long at each door?</legend>
-          <p className="muted small">Older kids are quicker. Tap one to see how many houses it fits, and how many streets you'll cross.</p>
-          <div className="door-grid">
-            {outcome.estimates.map((e) => (
+      <fieldset className="panel doors">
+        <legend>How long at each door?</legend>
+        <p className="muted small">Tap one to see how many houses it fits, and how many streets you'll cross.</p>
+        <div className="door-grid">
+          {outcome.doors.map((e) => {
+            const planning = pending === choiceKey({ ...form, doorSeconds: e.seconds });
+            return (
               <label key={e.seconds} className={`door ${form.doorSeconds === e.seconds ? 'on' : ''}`}>
                 <input
                   type="radio" name="door" value={e.seconds} checked={form.doorSeconds === e.seconds}
-                  onChange={() => onDoor(e.seconds)}
+                  onChange={() => onChoose({ doorSeconds: e.seconds })}
                 />
                 <span className="door-s">{e.seconds} sec</span>
-                <span className="door-h">
-                  {pendingDoor === e.seconds
-                    ? 'planning…'
-                    : e.houses === undefined ? 'tap to see' : e.houses === null ? 'no route fits' : `~${e.houses} houses`}
-                </span>
-                {typeof e.houses === 'number' && e.crossings !== undefined && pendingDoor !== e.seconds && (
+                <span className="door-h">{housesText(e, planning)}</span>
+                {typeof e.houses === 'number' && e.crossings !== undefined && !planning && (
                   <span className="door-h">{e.crossings} {e.crossings === 1 ? 'crossing' : 'crossings'}</span>
                 )}
               </label>
-            ))}
-          </div>
-        </fieldset>
-      )}
+            );
+          })}
+        </div>
+      </fieldset>
+
+      <fieldset className="panel doors">
+        <legend>How fast do you walk?</legend>
+        <p className="muted small">Tap one to see how many houses it fits, and when you'd be home.</p>
+        <div className="door-grid">
+          {outcome.paces.map((e) => {
+            const choice = paceChoice(e.pace);
+            const planning = pending === choiceKey({ ...form, pace: e.pace });
+            return (
+              <label key={e.pace} className={`door ${form.pace === e.pace ? 'on' : ''}`}>
+                <input
+                  type="radio" name="pace" value={e.pace} checked={form.pace === e.pace}
+                  onChange={() => onChoose({ pace: e.pace })}
+                />
+                <span className="door-s">{choice.label}</span>
+                <span className="door-d">{choice.description}</span>
+                <span className="door-h">{housesText(e, planning)}</span>
+                {typeof e.houses === 'number' && e.homeBy24 && !planning && (
+                  <span className="door-h">home by {ampm(e.homeBy24)}</span>
+                )}
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
 
       <TonightCard tonight={tonight} note={weatherNote} demo={demo} />
 
@@ -125,8 +153,7 @@ export default function Results({ outcome, plan, form, title, demo, tonight, wea
         <div><span className="num">{schedule.totals.doorMinutes}</span> min at doors</div>
         <div><span className="num">{schedule.totals.streetCrossings}</span> street crossings</div>
         <p className="muted small">
-          Pace {schedule.pace.mph} mph for a {outcome.youngest}-year-old{form.stroller ? ' with a stroller' : ''},
-          {' '}{schedule.pace.doorSeconds} sec a door, {schedule.minutesSpare} min to spare.
+          {paceChoice(form.pace).label} pace, {schedule.pace.doorSeconds} sec a door, {schedule.minutesSpare} min to spare.
         </p>
       </div>
 

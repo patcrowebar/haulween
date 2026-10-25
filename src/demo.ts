@@ -15,10 +15,9 @@ export const DEMO = {
     date: nextHalloween(),
     start: '17:00',
     end: '20:00',
-    ages: '10, 13',
-    stroller: false,
     avoid: '',
-    doorSeconds: 60,
+    doorSeconds: 45,
+    pace: 'steady',
   } satisfies PlanForm,
   /** A made-up but typical Halloween night. */
   tonight: {
