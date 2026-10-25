@@ -12,7 +12,7 @@ import type { NamedLine, OsmData, Pt } from '../route/types';
 import { isNum, withDefaults } from '../stored';
 import { DEFAULT_DOOR_SECONDS, DEFAULT_PACE, paceChoice } from '../config';
 import { loadStreets, saveStreets } from './planStore';
-import type { PlanForm } from './planning';
+import { streetOnlyTitle, type PlanForm } from './planning';
 
 const PLAN_KEY = 'haulween.night.plan';
 const PROGRESS_KEY = 'haulween.night.progress';
@@ -89,7 +89,8 @@ export function toNightPlan(saved: unknown): NightPlan | null {
     exclude: [] as string[],
   });
   const lines = withDefaults(p.lines, { streetLines: [] as NamedLine[], busyRoads: [] as NamedLine[], areas: [] as NamedLine[] });
-  return { ...p, v: 1, schedule, options, lines };
+  // An older version's title could name a town or neighborhood too: keep just the street.
+  return { ...p, v: 1, title: streetOnlyTitle(p.title), schedule, options, lines };
 }
 
 /** Saved progress, from any version of the app; null if it doesn't fit this plan. */

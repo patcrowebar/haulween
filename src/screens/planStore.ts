@@ -10,7 +10,7 @@
 import type { Tonight } from '../data/weather';
 import type { OsmData, Pt } from '../route/types';
 import { isNum, withDefaults } from '../stored';
-import { toForm, type PlanForm } from './planning';
+import { streetOnlyTitle, toForm, type PlanForm } from './planning';
 
 const PLANNED_KEY = 'haulween.planned';
 const STREETS_KEY = 'haulween.streets';
@@ -90,7 +90,8 @@ export function toPlanned(saved: unknown): Planned | null {
   if (!form.address.trim()) return null;
   const t = field(saved, 'tonight');
   const tonight = typeof t === 'object' && t !== null && Array.isArray(field(t, 'hours')) ? (t as Tonight) : null;
-  return { v: 1, form, home, title, tonight };
+  // An older version's title could name a town or neighborhood too: keep just the street.
+  return { v: 1, form, home, title: streetOnlyTitle(title), tonight };
 }
 
 /** Keep a route just planned, and the streets it came from. False if the phone has no room. */

@@ -43,28 +43,28 @@ async function getJson<T>(fetchFn: Fetch, url: string, init: RequestInit, ms: nu
 export type Place = {
   lat: number;
   lng: number;
-  /** The street, as the geocoder spells it ("Elm Street"); empty if it gave none. */
-  road: string;
   /**
-   * The town or city, never a small local area name: a neighborhood, suburb or hamlet name
-   * ("Lakeview") means little to anyone else. Empty if there's none.
+   * The street, as the geocoder spells it ("Elm Street"); empty if it gave none. The only part of
+   * the answer kept besides the point: the route title shows the street alone, never a town or
+   * neighborhood (people know what town they're in, and geocoders' area names often aren't the
+   * ones locals use).
    */
-  town: string;
+  road: string;
   /** Who found it, for the credit line. */
   source: 'Nominatim' | 'Photon';
 };
 
 /**
- * A place read back from the cache, which an older version may have written. Versions before
- * road and town kept one `label` ("Elm Street, Lakeview"); its street is kept, but not its town,
- * which could be a small local area name. null if there's no usable point.
+ * A place read back from the cache, which an older version may have written: with a `town`
+ * (dropped now), or with one `label` like "Elm Street, Lakeview" (only its street is kept).
+ * null if there's no usable point.
  */
 export function toPlace(saved: unknown): Place | null {
-  const p = withDefaults(saved, { lat: NaN, lng: NaN, road: '', town: '', source: 'Nominatim' as Place['source'], label: '' });
+  const p = withDefaults(saved, { lat: NaN, lng: NaN, road: '', source: 'Nominatim' as Place['source'], label: '' });
   if (!isNum(p.lat) || !isNum(p.lng)) return null;
   const parts = p.label.split(',').map((s) => s.trim());
   const road = p.road || (parts.length >= 2 ? parts[0] : '');
-  return { lat: p.lat, lng: p.lng, road, town: p.town, source: p.source === 'Photon' ? 'Photon' : 'Nominatim' };
+  return { lat: p.lat, lng: p.lng, road, source: p.source === 'Photon' ? 'Photon' : 'Nominatim' };
 }
 
 export interface Geocoder {
@@ -112,7 +112,6 @@ export class NominatimGeocoder implements Geocoder {
       lat: Number(rows[0].lat),
       lng: Number(rows[0].lon),
       road: a.road ?? '',
-      town: a.city ?? a.town ?? a.village ?? a.municipality ?? '',
       source: this.name,
     };
   }
@@ -136,7 +135,6 @@ export class PhotonGeocoder implements Geocoder {
       lat: f.geometry.coordinates[1],
       lng: f.geometry.coordinates[0],
       road: p.street ?? p.name ?? '',
-      town: p.city ?? p.town ?? p.village ?? '',
       source: this.name,
     };
   }

@@ -44,8 +44,18 @@ describe('settings saved by an older version', () => {
       [`haulween.geo.${key}`]: { lat: 41.8, lng: -82.1, label: 'Elm Street, Lakeview', source: 'Nominatim' },
     }));
     const place = await geo.search(PLACEHOLDER_ADDRESS);
-    expect(place).toEqual({ lat: 41.8, lng: -82.1, road: 'Elm Street', town: '', source: 'Nominatim' });
-    // The old label's town might be a small local area name ("Lakeview"), so it isn't used.
+    expect(place).toEqual({ lat: 41.8, lng: -82.1, road: 'Elm Street', source: 'Nominatim' });
+    // The old label's area name ("Lakeview") isn't kept or shown.
+    expect(routeTitle(place!)).toBe('Your route from Elm St');
+  });
+
+  it('a cached address from the version that kept a town loads with the street only', async () => {
+    const key = PLACEHOLDER_ADDRESS.toLowerCase();
+    const geo = new FallbackGeocoder([offline], storage({
+      [`haulween.geo.${key}`]: { lat: 41.8, lng: -82.1, road: 'Elm Street', town: 'Springwood', source: 'Photon' },
+    }));
+    const place = await geo.search(PLACEHOLDER_ADDRESS);
+    expect(place).toEqual({ lat: 41.8, lng: -82.1, road: 'Elm Street', source: 'Photon' });
     expect(routeTitle(place!)).toBe('Your route from Elm St');
     const out = makePlan(SPRINGWOOD, HOME, toForm(oldForm));
     expect(out.result.ok).toBe(true);
@@ -88,10 +98,10 @@ describe('settings saved by an older version', () => {
     const key = PLACEHOLDER_ADDRESS.toLowerCase();
     const fresh: Geocoder = {
       name: 'Nominatim', credit: '',
-      search: async () => ({ lat: 41.8, lng: -82.1, road: 'Elm Street', town: 'Springwood', source: 'Nominatim' }),
+      search: async () => ({ lat: 41.8, lng: -82.1, road: 'Maple Avenue', source: 'Nominatim' }),
     };
     const geo = new FallbackGeocoder([fresh], storage({ [`haulween.geo.${key}`]: { label: 'Elm Street' } }));
-    expect(await geo.search(PLACEHOLDER_ADDRESS)).toMatchObject({ town: 'Springwood' });
+    expect(await geo.search(PLACEHOLDER_ADDRESS)).toMatchObject({ road: 'Maple Avenue' });
   });
 });
 
@@ -115,6 +125,11 @@ describe('a Night Mode plan saved by an older version', () => {
     expect(res.plan.schedule.pace).toEqual({ mph: 1.5, doorSeconds: 60 });
     const steady = toNightPlan(JSON.parse(JSON.stringify({ ...night, options: { startTime: '17:00', endTime: '21:00', youngestAge: 13 } })))!;
     expect(steady.options.paceMph).toBe(2.0);
+  });
+
+  it('an older title with a town or neighborhood shows the street only', () => {
+    const p = toNightPlan(JSON.parse(JSON.stringify({ ...night, title: 'Your route from Elm St, Lakeview' })))!;
+    expect(p.title).toBe('Your route from Elm St');
   });
 
   it('fills in missing settings, and a replan from it still passes the route check', () => {

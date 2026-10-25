@@ -9,7 +9,7 @@ import { nextHalloween, type PlanForm } from './screens/planning';
 export const DEMO = {
   home: HOME,
   data: SPRINGWOOD,
-  title: 'Your route from Elm St, Springwood (demo)',
+  title: 'Your route from Elm St (demo)',
   form: {
     address: PLACEHOLDER_ADDRESS,
     date: nextHalloween(),

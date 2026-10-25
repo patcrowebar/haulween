@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { HOME, SPRINGWOOD } from '../route/__fixtures__/springwood';
 import {
-  DEFAULT_FORM, ampm, choiceKey, estimatesFor, leftOut, makePlan, matchAvoid, nextHalloween, routeTitle,
+  DEFAULT_FORM, ampm, choiceKey, estimatesFor, leftOut, makePlan, matchAvoid, nextHalloween, routeTitle, streetOnlyTitle,
 } from './planning';
 import { planRoute } from '../route/plan';
 import { PACE_CHOICES, PLACEHOLDER_ADDRESS } from '../config';
@@ -101,13 +101,24 @@ describe('makePlan', () => {
 });
 
 describe('the results title', () => {
-  it('uses the street and the town, short street names', () => {
-    expect(routeTitle({ road: 'Elm Street', town: 'Springwood' })).toBe('Your route from Elm St, Springwood');
+  it('shows the street only, in its short form', () => {
+    expect(routeTitle({ road: 'Elm Street' })).toBe('Your route from Elm St');
+    expect(routeTitle({ road: 'Maple Avenue' })).toBe('Your route from Maple Ave');
   });
 
-  it('falls back to the street alone when there is no town', () => {
-    expect(routeTitle({ road: 'Walnut Street', town: '' })).toBe('Your route from Walnut St');
-    expect(routeTitle({ road: '', town: '' })).toBe('Your route from home');
+  it('says just "Your route" when the geocoder gave no street', () => {
+    expect(routeTitle({ road: '' })).toBe('Your route');
+    expect(routeTitle({ road: '   ' })).toBe('Your route');
+  });
+
+  it('turns an older title with a town or neighborhood into the street only', () => {
+    expect(streetOnlyTitle('Your route from Elm St, Springwood')).toBe('Your route from Elm St');
+    expect(streetOnlyTitle('Your route from Maple Avenue, Lakeview')).toBe('Your route from Maple Ave');
+    expect(streetOnlyTitle('Your route from Elm St, Springwood (demo)')).toBe('Your route from Elm St (demo)');
+    expect(streetOnlyTitle('Your route from Elm St')).toBe('Your route from Elm St');
+    expect(streetOnlyTitle('Your route from home')).toBe('Your route');
+    expect(streetOnlyTitle('Your route')).toBe('Your route');
+    expect(streetOnlyTitle('something else entirely')).toBe('Your route');
   });
 });
 

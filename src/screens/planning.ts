@@ -166,10 +166,20 @@ export function makePlan(data: OsmData, home: Pt, form: PlanForm): PlanOutcome {
   return { ...main, ...estimatesFor(form, (k) => plans.get(k)) };
 }
 
-/** "Your route from Elm St, Springwood", or "Your route from Elm St" when there's no town. */
-export function routeTitle(place: { road: string; town: string }): string {
-  const where = [shortName(place.road.trim()), place.town.trim()].filter(Boolean).join(', ');
-  return `Your route from ${where || 'home'}`;
+/** "Your route from Elm St": the street only, never a town or neighborhood. "Your route" with no street. */
+export function routeTitle(place: { road: string }): string {
+  const street = shortName(place.road.trim());
+  return street ? `Your route from ${street}` : 'Your route';
+}
+
+/**
+ * A title saved by an older version, which could add a town or neighborhood after a comma
+ * ("Your route from Elm St, Lakeview"): the street only, keeping a "(demo)" mark.
+ */
+export function streetOnlyTitle(saved: string): string {
+  const m = /^Your route from ([^,(]*[^,(\s])(?:\s*,[^(]*)?(\s*\(demo\))?\s*$/.exec(saved.trim());
+  if (!m || m[1].trim() === 'home') return `Your route${m?.[2] ?? ''}`;
+  return `Your route from ${shortName(m[1].trim())}${m[2] ? ' (demo)' : ''}`;
 }
 
 export type LeftOut = { text: string; houses: number };

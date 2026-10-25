@@ -25,7 +25,7 @@ function memoryStorage(limit = Infinity): Storage {
 }
 
 const form = { ...DEFAULT_FORM, address: PLACEHOLDER_ADDRESS, date: '2026-10-31', start: '17:00', end: '21:00' };
-const planned: Planned = { v: 1, form, home: HOME, title: 'Your route from Elm St, Springwood', tonight: null };
+const planned: Planned = { v: 1, form, home: HOME, title: 'Your route from Elm St', tonight: null };
 const fetchSpy = vi.fn(() => { throw new Error('no network calls in these tests'); });
 
 beforeEach(() => {
@@ -51,6 +51,18 @@ describe('a planned route, kept on this phone', () => {
     expect(again.result.plan.segments).toEqual(first.result.plan.segments);
     expect(again.result.plan.schedule.rows).toEqual(first.result.plan.schedule.rows);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('a route kept by an older version, with a town in its title, shows the street only', () => {
+    savePlanned({ ...planned, title: 'Your route from Elm St, Springwood' }, SPRINGWOOD);
+    expect(loadPlanned()!.planned.title).toBe('Your route from Elm St');
+  });
+
+  it('keeps no town or neighborhood with the route', () => {
+    savePlanned(planned, SPRINGWOOD);
+    const kept = JSON.parse(localStorage.getItem('haulween.planned')!);
+    expect(JSON.stringify(kept)).not.toMatch(/"town"/);
+    expect(kept.title).toBe('Your route from Elm St');
   });
 
   it('planning again for the same address reuses the kept streets', () => {
