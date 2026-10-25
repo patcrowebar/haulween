@@ -29,7 +29,15 @@ npm run build
 
 Phones only allow GPS on `https`, so test Night Mode on the deployed site.
 
-**Demo mode:** add `?demo` to the address (http://localhost:5173/?demo, or https://haulween.vercel.app/?demo), or press "Try the demo". It plans around 1428 Elm St in Springwood, a made-up neighborhood, with made-up weather and no network calls at all. Screenshots in `docs/screenshots/` come from it.
+**Demo mode:** add `?demo` to the address (http://localhost:5173/?demo, or https://haulween.vercel.app/?demo), or press "Try the demo". It plans around 1428 Elm St in Springwood, a made-up neighborhood, with made-up weather and no network calls at all. The screenshots below come from it.
+
+## Screenshots
+
+From demo mode on a 390 px wide phone screen, around 1428 Elm St in made-up Springwood.
+
+| Plan | Door time and pace | Map | Night Mode |
+| --- | --- | --- | --- |
+| <img src="docs/screenshots/1-plan-form.png" alt="The Plan form: starting address, night, start and home-by times, roads to avoid" width="180"> | <img src="docs/screenshots/2-results-door-and-pace.png" alt="Results: about 144 houses, home by 7:44 pm, with the four door times and the four walking paces" width="180"> | <img src="docs/screenshots/3-map.png" alt="The route in orange with numbered streets, Home, and a busy road dashed" width="180"> | <img src="docs/screenshots/4-night-mode.png" alt="Night Mode: On track, the street you're on, and your dot on the map" width="180"> |
 
 ## How it works
 

@@ -144,4 +144,29 @@ describe('placePinsOnScreen', () => {
     const ftPerPx = 364000 / (k * ky);
     for (const d of offLine(pins, segs, home)) expect(d / ftPerPx).toBeLessThan(1);
   });
+
+  it('keeps pins out from under the zoom buttons and credits, still on their own streets', () => {
+    // On the results map the zoom buttons covered pins 6 and 7. A box where the buttons sit,
+    // over the route's top-right corner, must end up with no pin under it.
+    const r = planRoute(SPRINGWOOD, HOME, { startTime: '5:00pm', endTime: '8:00pm', paceMph: 2.0, doorSeconds: 45 });
+    if (!r.ok) throw new Error('plan failed');
+    const segs = r.plan.segments;
+    const route = routeLine(segs);
+    const home = route[route.length - 1];
+    const ky = 1 / Math.cos((41.8 * Math.PI) / 180);
+    const spanX = Math.max(...route.map((p) => p[1])) - Math.min(...route.map((p) => p[1]));
+    const spanY = (Math.max(...route.map((p) => p[0])) - Math.min(...route.map((p) => p[0]))) * ky;
+    const k = Math.min((358 - 80) / spanX, (380 - 80) / spanY);
+    const project = (p: [number, number]): [number, number] => [(p[1] + 82.1) * k + 200, (41.8 - p[0]) * k * ky + 200];
+    const unproject = ([x, y]: [number, number]): [number, number] => [41.8 - (y - 200) / (k * ky), (x - 200) / k - 82.1];
+    const xs = route.map((p) => project(p)[0]), ys = route.map((p) => project(p)[1]);
+    const buttons: [number, number, number, number] = [Math.max(...xs) - 30, Math.min(...ys) - 40, Math.max(...xs) + 40, Math.min(...ys) + 70];
+    const before = placePinsOnScreen(segs, home, project, unproject);
+    const hit = (b: number[], x: number, y: number) => x - 16 < b[2] && b[0] < x + 16 && y - 16 < b[3] && b[1] < y + 16;
+    expect(before.some((p) => hit(buttons, ...project([p.lat, p.lng])))).toBe(true); // the old problem
+    const after = placePinsOnScreen(segs, home, project, unproject, 16, [buttons]);
+    for (const p of after) expect(hit(buttons, ...project([p.lat, p.lng]))).toBe(false);
+    const ftPerPx = 364000 / (k * ky);
+    for (const d of offLine(after, segs, home)) expect(d / ftPerPx).toBeLessThan(1);
+  });
 });

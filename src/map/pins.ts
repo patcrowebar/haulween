@@ -113,8 +113,9 @@ export function placeLabels(
 export const HOME_BOX = { halfWidth: 36, above: 47, below: 17 };
 
 /**
- * Pins placed on screen, so none covers Home or another pin at the map's real zoom when its
- * street has room. Each pin stays on its own street line, wherever on it there's most room.
+ * Pins placed on screen, so none covers Home, another pin or the map's own buttons and credits
+ * (`avoid`) at the map's real zoom when its street has room. Each pin stays on its own street
+ * line, wherever on it there's most room.
  */
 export function placePinsOnScreen(
   segments: Segment[],
@@ -122,14 +123,16 @@ export function placePinsOnScreen(
   project: (p: Pt) => [number, number],
   unproject: (xy: [number, number]) => Pt,
   pinHalf = 16,
+  avoid: Box[] = [],
 ): Pin[] {
   const [hx, hy] = project(home);
-  const boxes: Box[] = [[hx - HOME_BOX.halfWidth, hy - HOME_BOX.above, hx + HOME_BOX.halfWidth, hy - HOME_BOX.below]];
+  const boxes: Box[] = [[hx - HOME_BOX.halfWidth, hy - HOME_BOX.above, hx + HOME_BOX.halfWidth, hy - HOME_BOX.below], ...avoid];
+  /** Home and the map's controls: a pin under any of these is much worse than touching another pin. */
+  const fixed = boxes.length;
   const boxAt = ([x, y]: [number, number]): Box => [x - pinHalf, y - pinHalf, x + pinHalf, y + pinHalf];
   const area = (a: Box, b: Box) =>
     Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
-  // Covering Home is much worse than touching another pin.
-  const crowding = (b: Box) => boxes.reduce((t, o, k) => t + area(o, b) * (k === 0 ? 10 : 1), 0);
+  const crowding = (b: Box) => boxes.reduce((t, o, k) => t + area(o, b) * (k < fixed ? 10 : 1), 0);
   const pins: Pin[] = [];
   segments.forEach((s, i) => {
     if (!s.points.length) return;

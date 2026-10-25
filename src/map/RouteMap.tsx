@@ -117,8 +117,18 @@ export default function RouteMap({ segments, lines: pocket, demo, you = null, do
         const { lat, lng } = map.unproject([x, y]);
         return [lat, lng];
       };
-      // Placed on screen at the starting zoom, so no number hides Home or another number.
-      const pins = placePinsOnScreen(segments, home, project, unproject);
+      // The map's own zoom buttons and credits, measured where they are, so nothing hides under them.
+      const container = map.getContainer();
+      const { clientWidth, clientHeight } = container;
+      const outer = container.getBoundingClientRect();
+      const measured = (sel: string, fallback: Box): Box => {
+        const r = container.querySelector(sel)?.getBoundingClientRect();
+        return r && r.width ? [r.left - outer.left - 4, r.top - outer.top - 4, r.right - outer.left + 4, r.bottom - outer.top + 4] : fallback;
+      };
+      const controls = measured('.maplibregl-ctrl-top-right', [clientWidth - 64, 0, clientWidth, 116]); // zoom buttons
+      const credits = measured('.maplibregl-ctrl-bottom-right', [clientWidth - 260, clientHeight - 28, clientWidth, clientHeight]);
+      // Placed on screen at the starting zoom, so no number hides Home, another number or a button.
+      const pins = placePinsOnScreen(segments, home, project, unproject, 16, [controls, credits]);
       if (demo) {
         // No basemap labels in the demo, so name the streets, clear of the pins and Home.
 
@@ -126,9 +136,6 @@ export default function RouteMap({ segments, lines: pocket, demo, you = null, do
           const [x, y] = project(p);
           return [x - rx, y - ry, x + rx, y + ry];
         };
-        const { clientWidth, clientHeight } = map.getContainer();
-        const controls: Box = [clientWidth - 64, 0, clientWidth, 116]; // zoom buttons
-        const credits: Box = [clientWidth - 260, clientHeight - 28, clientWidth, clientHeight];
         const [hx, hy] = project(home);
         const homeBox: Box = [hx - HOME_BOX.halfWidth, hy - HOME_BOX.above, hx + HOME_BOX.halfWidth, hy - HOME_BOX.below];
         const taken = [controls, credits, homeBox, ...pins.map((p) => around([p.lat, p.lng], 16, 16))];
