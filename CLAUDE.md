@@ -45,11 +45,11 @@ src/
     schedule.ts    # pace, door time, crossings, times, head-home and latest times
     check.ts       # route check: every stretch on a real street, never along a busy road
   data/         # Overpass, geocoder, Open-Meteo clients (polite, cached)
-api/
-  streets.ts    # the street-data relay (Vercel function), and the one Overpass query
   ai/           # Claude client and tool definitions (optional feature)
   map/          # MapLibre setup, layers, dark style
   screens/      # Plan, Night Mode, Settings
+api/
+  streets.ts    # the street-data relay (Vercel function), and the one Overpass query
 reference/      # the original Claude skill's Python: the behavior to match
 docs/           # build brief, decisions, screenshots
 ```
