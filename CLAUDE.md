@@ -45,7 +45,7 @@ src/
     schedule.ts    # pace, door time, crossings, times, head-home and latest times
     check.ts       # route check: every stretch on a real street, never along a busy road
   data/         # Overpass, geocoder, Open-Meteo clients (polite, cached)
-  ai/           # Claude client and tool definitions (optional feature)
+  ai/           # Jack (optional): the Claude client, what it's sent, and the checks on its reply
   map/          # MapLibre setup, layers, dark style
   screens/      # Plan, Night Mode, Settings
 api/
@@ -80,6 +80,7 @@ These come from real bugs. Don't relax them without asking.
 - **The street address goes only to the geocoder.** Everything after that uses coordinates.
 - **Overpass gets the home point rounded to 3 decimals** (about 100 m). Through the relay, Overpass.ch sees Vercel's address, not the visitor's.
 - **Plans, settings and the API key stay in the visitor's browser** (`localStorage`). There's no analytics, telemetry or error reporting that sends data out.
+- **Jack (only with a key) gets street names, house counts and times, and the parent's message.** Never the address, coordinates, the plan's title or the home street. The exact list is under Jack below.
 - **Never log addresses, coordinates or keys** to the console in production builds.
 - **Use the placeholder address in every example, test, screenshot caption and doc:** 1428 Elm St, Springwood, OH (the house from *A Nightmare on Elm Street*). Never commit a real home address or a street-data sample from someone's real home neighborhood.
 
@@ -89,21 +90,20 @@ The in-app AI guide is called **Jack**. He speaks in short, friendly lines, like
 
 
 - **The app must work fully with the AI off.** Route, map, Night Mode, replans by tapping and the schedule all work without a key.
-- **The key is entered in Settings** and stored only in `localStorage`. Show where it's stored, include a "Forget my key" button, and suggest the visitor set a spending limit on their key.
-- **Call the Claude API directly from the browser** with the `anthropic-dangerous-direct-browser-access: true` header. Send the key only to Claude's API: never to any other host, never in a URL, never in logs.
+- **The key is entered in Settings** (`#settings`, linked from the foot of the Plan screen and of Night Mode) and stored only in `localStorage`. Show where it's stored, include a "Forget my key" button, and suggest the visitor set a spending limit on their key. Never show the key again once it's saved. No key, no Jack anywhere.
+- **Call the Claude API directly from the browser** with the `anthropic-dangerous-direct-browser-access: true` header. Send the key only to Claude's API, in the `x-api-key` header: never to any other host, never in a URL or body, never in logs.
 - **Load no third-party scripts** except MapLibre and its dependencies, so nothing else can read the key.
-- **The AI acts only through tools** that wrap the app's own functions:
-  - `exclude_street`
-  - `include_street`
-  - `set_door_seconds`
-  - `set_walking_pace`
-  - `set_window`
-  - `replan_from_here`
-  - `explain_route`
+- **Jack suggests; the parent decides.** For now Jack lives only in Night Mode ("Ask Jack"), not on the Plan screen. He answers in a line or two with at most one change, as structured JSON:
+  - skip streets, only from the list the app offers (never the street they're on, the walk home or the home street),
+  - an earlier home-by time (later than now, earlier than the current one),
+  - a slower walking pace.
 
-  It never edits street data, geometry or house counts, and every route it triggers still goes through the route check.
-- **Keep calls few and short.** No calls on page load, no chat history beyond the current plan. Use a current Claude model, and keep its name in one config constant.
-- **Explain failures in plain words.** A bad key, rate limit or network error gets a short message, and the app keeps working without AI.
+  The app checks the reply against those rules and refuses anything else whole. It tries the change with its own replan, runs the route check again, and shows the result. Nothing changes until the parent taps "Use this". Jack never reorders streets (hard rule 4: the optimizer picks the order), and never edits street data, geometry or house counts.
+- **What Jack is sent, and nothing more** (`JackContext` in `src/ai/jack.ts`): the remaining streets in order with house counts and planned times, the time now, the head-home and home-by times, minutes behind, the pace name, the streets he may skip and the slower paces, and the parent's message. The last row goes as "the walk home", and the home street, wherever a row names it, as "your street". Adding anything here needs a reason and the maintainer's OK.
+- **Later, Jack may get tools** that wrap the app's own functions (`exclude_street`, `include_street`, `set_door_seconds`, `set_walking_pace`, `set_window`, `replan_from_here`, `explain_route`). The same rules apply: the parent confirms, and every route goes through the route check.
+- **Keep calls few and short.** One call per question: no history, `max_tokens` 400, effort `low`, thinking off, a 15 s limit and no retry. Standard API features only, no betas. No calls on page load. The model name lives in one constant, `CLAUDE_MODEL` in `src/config.ts` (now `claude-haiku-5-5`).
+- **Explain failures in plain words.** A bad key, no credit, a rate limit, no signal, a timeout or a garbled reply gets one short line, and the route and Night Mode keep working.
+- **Tests mock Claude.** No real key and no network calls in any test.
 
 ## Being a good neighbor to free services
 
