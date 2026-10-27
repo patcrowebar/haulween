@@ -43,7 +43,7 @@ function beep(ctx: AudioContext) {
   }
 }
 
-export default function Night({ onLeave }: { onLeave: () => void }) {
+export default function Night({ onLeave, onSettings }: { onLeave: () => void; onSettings: () => void }) {
   const [plan, setPlan] = useState<NightPlan | null>(loadNight);
   if (!plan) {
     return (
@@ -53,10 +53,12 @@ export default function Night({ onLeave }: { onLeave: () => void }) {
       </main>
     );
   }
-  return <NightWalk key={plan.start} plan={plan} onPlan={setPlan} onLeave={onLeave} />;
+  return <NightWalk key={plan.start} plan={plan} onPlan={setPlan} onLeave={onLeave} onSettings={onSettings} />;
 }
 
-function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: NightPlan) => void; onLeave: () => void }) {
+function NightWalk({ plan, onPlan, onLeave, onSettings }: {
+  plan: NightPlan; onPlan: (p: NightPlan) => void; onLeave: () => void; onSettings: () => void;
+}) {
   const { segments, schedule } = plan;
   const n = segments.length;
   const tl = useMemo(() => timeline(schedule, plan.start, plan.date), [schedule, plan.start, plan.date]);
@@ -441,6 +443,9 @@ function NightWalk({ plan, onPlan, onLeave }: { plan: NightPlan; onPlan: (p: Nig
             {confirmEnd ? 'Tap again to end the night' : 'End the night'}
           </button>
         </div>
+        <footer className="app-foot">
+          <button type="button" className="link" onClick={onSettings}>Settings</button>
+        </footer>
         <p className="muted small footnote">
           House counts are estimates. Haulween can't tell which houses give out candy. Look for porch lights.
         </p>

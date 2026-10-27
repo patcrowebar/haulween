@@ -766,3 +766,34 @@ button {
   margin: 6px 0;
   padding-left: 28px;
 }
+
+/* ---------- Settings ---------- */
+
+.app-foot {
+  margin-top: 24px;
+  text-align: center;
+}
+
+.settings .field {
+  margin: 16px 0 12px;
+}
+
+.settings input {
+  width: 100%;
+  min-width: 0;
+}
+
+.key-saved {
+  color: var(--on-track);
+  font-weight: 700;
+}
+
+.settings-notes {
+  margin: 16px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.settings-notes li + li {
+  margin-top: 6px;
+}

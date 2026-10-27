@@ -47,7 +47,7 @@ function saveForm(form: PlanForm) {
 const hourOf = (hhmm: string) => Number(hhmm.split(':')[0]);
 const NO_ROUTE = "We couldn't make a safe walk from here with these streets. Try a longer window or fewer roads to avoid.";
 
-export default function Plan({ onNight }: { onNight: () => void }) {
+export default function Plan({ onNight, onSettings }: { onNight: () => void; onSettings: () => void }) {
   const wantsDemo = useMemo(() => new URLSearchParams(window.location.search).has('demo'), []);
   const debug = useMemo(() => new URLSearchParams(window.location.search).has('debug'), []);
   const [attempts, setAttempts] = useState<Attempt[]>([]);
@@ -384,6 +384,10 @@ export default function Plan({ onNight }: { onNight: () => void }) {
         {startError && <p className="error" role="alert">{startError}</p>}
         {keepNote && <p className="muted small">{keepNote}</p>}
       </div>
+
+      <footer className="app-foot">
+        <button type="button" className="link" onClick={onSettings}>Settings</button>
+      </footer>
     </main>
   );
 }
