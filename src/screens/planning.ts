@@ -109,6 +109,19 @@ export function avoidingText(avoid: AvoidResult): string | null {
   return roads.length ? `Avoiding: ${roads.join(', ')}` : null;
 }
 
+/**
+ * The warning at the top of the results when roads to avoid weren't all matched:
+ * "1 road to avoid wasn't found: 'Parl'. Check it above." Null when every entry matched.
+ */
+export function notFoundWarning(avoid: AvoidResult): string | null {
+  const n = avoid.notFound.length;
+  if (!n) return null;
+  const names = avoid.notFound.map((t) => `'${t}'`).join(', ');
+  return n === 1
+    ? `1 road to avoid wasn't found: ${names}. Check it above.`
+    : `${n} roads to avoid weren't found: ${names}. Check them above.`;
+}
+
 export function matchAvoid(text: string, data: OsmData, home: Pt): AvoidResult {
   return readAvoid(text, roadNamesNear(data, home));
 }

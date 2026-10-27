@@ -77,6 +77,12 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
   formRef.current = form;
   const known = (k: string) => plans.current.get(k)?.result;
   const resultsRef = useRef<HTMLDivElement>(null);
+  const avoidRef = useRef<HTMLInputElement>(null);
+  /** From the warning at the top of the results: back up to "Roads to avoid". */
+  const checkAvoid = () => {
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    avoidRef.current?.closest('.field')?.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
+  };
   const [saved] = useState(() => loadNight());
   const [startError, setStartError] = useState<string | null>(null);
   /** Said when the phone had no room to keep the route for next time. */
@@ -382,7 +388,7 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
         <label className="field">
           <span>Roads to avoid <span className="muted">(optional)</span></span>
           <input
-            type="text" value={form.avoid} placeholder="Maple Ave, Oak St"
+            ref={avoidRef} type="text" value={form.avoid} placeholder="Maple Ave, Oak St"
             onChange={(e) => set('avoid', e.target.value)}
           />
           <small className="muted">Busy roads are off-limits already.</small>
@@ -415,7 +421,7 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
           <Results
             outcome={outcome} plan={outcome.result.plan} form={form} title={found.title}
             demo={found.demo} tonight={tonight} weatherNote={weatherNote} onChoose={choose} pending={pending}
-            onStartNight={startNight}
+            onStartNight={startNight} onCheckAvoid={checkAvoid}
           />
         )}
         {startError && <p className="error" role="alert">{startError}</p>}

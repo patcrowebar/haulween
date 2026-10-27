@@ -514,6 +514,20 @@ button {
   margin: 8px 0 0;
 }
 
+/* Top of the results: roads to avoid that weren't found. Tapping it goes back up to the field. */
+.avoid-warning {
+  display: block;
+  width: 100%;
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--behind);
+  border-radius: 12px;
+  background: rgba(242, 193, 78, 0.1);
+  color: var(--behind);
+  font-weight: 700;
+  text-align: left;
+}
+
 .notes p {
   margin: 4px 0;
 }

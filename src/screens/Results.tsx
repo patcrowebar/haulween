@@ -5,7 +5,7 @@ import type { Plan } from '../route/plan';
 import { nextStretchLink } from '../route/schedule';
 import { flagsFor, updatedText, type Tonight } from '../data/weather';
 import { paceChoice } from '../config';
-import { ampm, choiceKey, leftOut, patternText, type Estimate, type PlanForm, type PlanOutcome } from './planning';
+import { ampm, choiceKey, leftOut, notFoundWarning, patternText, type Estimate, type PlanForm, type PlanOutcome } from './planning';
 
 // MapLibre is most of the app's size; load it once there's a route to draw.
 const RouteMap = lazy(() => import('../map/RouteMap'));
@@ -24,23 +24,30 @@ type Props = {
   pending: string | null;
   /** Open Night Mode with this plan; `sound` is whether to beep at turn-around time. */
   onStartNight: (sound: boolean) => void;
+  /** Take the parent back up to "Roads to avoid". */
+  onCheckAvoid: () => void;
 };
 
 /** "~152 houses", or why there's no number yet. */
 const housesText = (e: Estimate, planning: boolean) =>
   planning ? 'planning…' : e.houses === undefined ? 'tap to see' : e.houses === null ? 'no route fits' : `~${e.houses} houses`;
 
-export default function Results({ outcome, plan, form, title, demo, tonight, weatherNote, onChoose, pending, onStartNight }: Props) {
+export default function Results({ outcome, plan, form, title, demo, tonight, weatherNote, onChoose, pending, onStartNight, onCheckAvoid }: Props) {
   const { schedule, estimate, segments } = plan;
   const leg = schedule.lastLeg;
   const link = nextStretchLink(segments, 0);
   const skipped = leftOut(plan.skipped, plan.walked);
   const { avoid } = outcome;
+  const notFound = notFoundWarning(avoid);
   const [sound, setSound] = useState(false);
 
   return (
     <section className="results" aria-labelledby="results-title">
       <h2 id="results-title">{title}</h2>
+
+      {notFound && (
+        <button type="button" className="avoid-warning" onClick={onCheckAvoid}>{notFound}</button>
+      )}
 
       <div className="stats">
         <div className="stat big">
@@ -157,14 +164,13 @@ export default function Results({ outcome, plan, form, title, demo, tonight, wea
         </p>
       </div>
 
-      {(skipped.length > 0 || avoid.exclude.length > 0 || avoid.notFound.length > 0 || avoid.alreadyOff.length > 0) && (
+      {(skipped.length > 0 || avoid.exclude.length > 0 || avoid.alreadyOff.length > 0) && (
         <div className="panel notes">
           {skipped.length > 0 && (
             <p>Left out to fit the time: {skipped.map((s) => `${s.text} (~${s.houses})`).join(', ')}.</p>
           )}
           {avoid.exclude.length > 0 && <p>Skipping, as you asked: {avoid.exclude.join(', ')}.</p>}
           {avoid.alreadyOff.length > 0 && <p>{avoid.alreadyOff.join(', ')}: busy, so it's off the route already.</p>}
-          {avoid.notFound.length > 0 && <p>We didn't find {avoid.notFound.join(', ')} near home.</p>}
         </div>
       )}
 

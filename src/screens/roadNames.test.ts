@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { PLACEHOLDER_ADDRESS } from '../config';
 import { HOME, SPRINGWOOD } from '../route/__fixtures__/springwood';
-import { DEFAULT_FORM, avoidingText, makePlan, matchAvoid } from './planning';
+import { DEFAULT_FORM, avoidingText, makePlan, matchAvoid, notFoundWarning } from './planning';
 import { matchRoad, parseName, typoDistance, typosAllowed, withSuggestion } from './roadNames';
 
 const form = { ...DEFAULT_FORM, address: PLACEHOLDER_ADDRESS, date: '2026-10-31', start: '17:00', end: '20:00' };
@@ -100,5 +100,14 @@ describe('roads to avoid on Springwood', () => {
     expect(out.avoid.exclude).toEqual(['Maple Ave']);
     expect(out.result.plan.segments.some((s) => s.street === 'Maple Ave')).toBe(false);
     expect(out.result.plan.estimate.houses).toBeGreaterThan(0);
+  });
+
+  it('warns at the top of the results when an entry was not found, and not when all matched', () => {
+    expect(notFoundWarning(makePlan(SPRINGWOOD, HOME, { ...form, avoid: 'Maple Ave, Parl' }).avoid))
+      .toBe("1 road to avoid wasn't found: 'Parl'. Check it above.");
+    expect(notFoundWarning(makePlan(SPRINGWOOD, HOME, { ...form, avoid: 'Parl, Zzyzx Blvd, Spruse St' }).avoid))
+      .toBe("2 roads to avoid weren't found: 'Parl', 'Zzyzx Blvd'. Check them above.");
+    expect(notFoundWarning(makePlan(SPRINGWOOD, HOME, { ...form, avoid: 'maple avenue, Spruse St, Main Street' }).avoid)).toBeNull();
+    expect(notFoundWarning(makePlan(SPRINGWOOD, HOME, form).avoid)).toBeNull();
   });
 });
