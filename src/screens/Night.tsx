@@ -3,12 +3,17 @@
 // no network, no AI. Location stays on the phone.
 
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { askJack, makeQuestion, tryChange, type Suggestion } from '../ai/jack';
+import { loadKey } from '../ai/key';
+import { DEFAULT_PACE, paceChoice } from '../config';
+import type { Plan, PlanOptions } from '../route/plan';
 import { nextStretchLink } from '../route/schedule';
 import {
-  canStartEarly, clock12, countdownText, hasStarted, minutesText, nightStatus, setsOffEarly, timeline, turnAroundDue,
+  canStartEarly, clock12, countdownText, hasStarted, minutesText, nightStatus, replanTime, setsOffEarly, timeline, turnAroundDue,
 } from '../route/status';
 import { checkOff, onReading, pointAlong, startTrack, uncheck, type Reading } from '../route/track';
-import type { Pt } from '../route/types';
+import type { OsmData, Pt } from '../route/types';
+import AskJack, { type Preview } from './AskJack';
 import {
   forgetNight, freshProgress, loadNight, loadNightData, loadProgress, minutesOn, saveNight, saveProgress,
   type NightPlan, type NightProgress,
@@ -45,6 +50,8 @@ function beep(ctx: AudioContext) {
 
 export default function Night({ onLeave, onSettings }: { onLeave: () => void; onSettings: () => void }) {
   const [plan, setPlan] = useState<NightPlan | null>(loadNight);
+  // Each new plan (a replan, or Jack's change) starts the walk screen afresh.
+  const [gen, setGen] = useState(0);
   if (!plan) {
     return (
       <main className="app">
@@ -53,7 +60,8 @@ export default function Night({ onLeave, onSettings }: { onLeave: () => void; on
       </main>
     );
   }
-  return <NightWalk key={plan.start} plan={plan} onPlan={setPlan} onLeave={onLeave} onSettings={onSettings} />;
+  const onPlan = (p: NightPlan) => { setPlan(p); setGen((g) => g + 1); };
+  return <NightWalk key={gen} plan={plan} onPlan={onPlan} onLeave={onLeave} onSettings={onSettings} />;
 }
 
 function NightWalk({ plan, onPlan, onLeave, onSettings }: {
@@ -81,6 +89,7 @@ function NightWalk({ plan, onPlan, onLeave, onSettings }: {
   const [wake, setWake] = useState<Wake>('pending');
   const [simulating, setSimulating] = useState(false);
   const [replanning, setReplanning] = useState(false);
+  const [jackOn] = useState(() => loadKey() !== null);
   const [note, setNote] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -255,41 +264,94 @@ function NightWalk({ plan, onPlan, onLeave, onSettings }: {
     setSimulating(true);
   }
 
+  /**
+   * The app's own replan from where the family is, with these options: the same for "Replan from
+   * here" and for Jack's changes. Before the night starts, it plans from the planned start.
+   */
+  async function runReplan(options: PlanOptions, data: OsmData) {
+    const p = progressRef.current;
+    const i = p.track.current;
+    const visited = segments.flatMap((s, k) => (p.track.done[k] ? [{ points: s.points, pattern: s.pattern }] : []));
+    const at = fraction !== null ? you : null;
+    const from = replanTime(tl, nowRef.current, started);
+    const res = await planner.replan(data, plan.home, { ...options, now: from }, { row: segments[i], at }, visited);
+    return { res, from };
+  }
+
+  /** Switch to a new route (already checked). Returns a message if this phone couldn't keep it. */
+  function adopt(next: Pick<Plan, 'segments' | 'schedule'>, options: PlanOptions, from: number): string | null {
+    const p = progressRef.current;
+    const nextPlan: NightPlan = { ...plan, options, start: from, segments: next.segments, schedule: next.schedule };
+    const fresh: NightProgress = {
+      track: startTrack(nextPlan.segments.length), alerted: false, sound: p.sound,
+      earlier: { houses: doneHouses, streets: p.earlier.streets + p.track.done.filter(Boolean).length },
+      demoClock: p.demoClock, startedEarly: p.startedEarly || started,
+    };
+    if (!saveNight(nextPlan, null, fresh)) return "This phone wouldn't save the new plan. Keep going and head home by the time on the bar.";
+    progressRef.current = fresh;
+    onPlan(nextPlan);
+    return null;
+  }
+
   async function replan() {
     const data = loadNightData(plan);
     if (!data) {
       setNote("The street data didn't fit on this phone, so replanning isn't possible. Use the check-offs and head home on time.");
       return;
     }
-    const p = progressRef.current;
-    const i = p.track.current;
     setReplanning(true);
     setNote(null);
     setSimulating(false);
     try {
-      const visited = segments.flatMap((s, k) => (p.track.done[k] ? [{ points: s.points, pattern: s.pattern }] : []));
-      const at = fraction !== null ? you : null;
-      const res = await planner.replan(data, plan.home, { ...plan.options, now }, { row: segments[i], at }, visited);
+      const { res, from } = await runReplan(plan.options, data);
       if (!res.ok) {
         setNote("We couldn't make a safe new route from here. Keep going and head home by the time on the bar.");
         return;
       }
-      const next: NightPlan = { ...plan, start: now, segments: res.plan.segments, schedule: res.plan.schedule };
-      const fresh: NightProgress = {
-        track: startTrack(next.segments.length), alerted: false, sound: p.sound,
-        earlier: { houses: doneHouses, streets: p.earlier.streets + p.track.done.filter(Boolean).length },
-        demoClock: p.demoClock, startedEarly: true,
-      };
-      if (!saveNight(next, null, fresh)) {
-        setNote("This phone wouldn't save the new plan. Keep going and head home by the time on the bar.");
-        return;
-      }
-      progressRef.current = fresh;
-      onPlan(next);
+      const problem = adopt(res.plan, plan.options, from);
+      if (problem) setNote(problem);
     } catch (e) {
       setNote(isCancelled(e) ? 'Replanning stopped. Try again.' : plainMessage(e));
     } finally {
       setReplanning(false);
+    }
+  }
+
+  /** Ask Jack, with only what he needs (see src/ai/jack.ts). */
+  function ask(message: string) {
+    const p = progressRef.current;
+    return askJack(loadKey(), makeQuestion({
+      title: plan.title, home: plan.home, lines: plan.lines, segments, schedule, tl,
+      done: p.track.done, current: p.track.current, now: nowRef.current, minutesBehind: status.behindMin,
+      paceMph: plan.options.paceMph ?? paceChoice(DEFAULT_PACE).mph, message,
+    }));
+  }
+
+  /** Try Jack's change with the app's own replan and route check. Nothing changes until "Use this". */
+  async function tryJack(s: Suggestion): Promise<Preview> {
+    const data = loadNightData(plan);
+    if (!data) return { ok: false, message: "The street data didn't fit on this phone, so Jack's ideas can't be tried. Your route still works." };
+    setSimulating(false);
+    const p = progressRef.current;
+    const stamp = `${p.track.current}|${p.track.done.join()}`;
+    let from = nowRef.current;
+    try {
+      const t = await tryChange(s, { options: plan.options, data, home: plan.home, lines: plan.lines }, async (options) => {
+        const r = await runReplan(options, data);
+        from = r.from;
+        return r.res;
+      });
+      if (!t.ok) return t;
+      return {
+        ok: true, housesToGo: t.plan.estimate.houses, homeBy: timeline(t.plan.schedule, from).homeBy,
+        use: () => {
+          const q = progressRef.current.track;
+          if (`${q.current}|${q.done.join()}` !== stamp) return "You've moved on since Jack suggested that. Ask him again.";
+          return adopt(t.plan, t.options, from);
+        },
+      };
+    } catch (e) {
+      return { ok: false, message: isCancelled(e) ? "Trying Jack's idea stopped partway. Try again." : plainMessage(e) };
     }
   }
 
@@ -323,7 +385,7 @@ function NightWalk({ plan, onPlan, onLeave, onSettings }: {
       <div className="app night-body">
         {plan.demo && (
           <div className="banner" role="status">
-            <span>Demo night on made-up streets. Nothing is sent anywhere.</span>
+            <span>Demo night on made-up streets. Nothing is sent anywhere{jackOn ? ' unless you ask Jack' : ''}.</span>
           </div>
         )}
 
@@ -395,6 +457,7 @@ function NightWalk({ plan, onPlan, onLeave, onSettings }: {
           </div>
         )}
         {note && <p className="error" role="alert">{note}</p>}
+        {jackOn && row && !headingHome && <AskJack ask={ask} tryIt={tryJack} housesToGo={leftHouses} />}
 
         {link && (
           <p className="handoff small">

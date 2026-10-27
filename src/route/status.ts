@@ -31,6 +31,12 @@ export const canStartEarly = (tl: Timeline, now: number) => now >= tl.start - EA
 export const hasStarted = (tl: Timeline, now: number, startedEarly: boolean) =>
   now >= tl.start || (startedEarly && canStartEarly(tl, now));
 
+/**
+ * The time a replan starts from: now, or the planned start while the night hasn't started. (A
+ * replan the evening before used to plan from then, with the whole evening as its window.)
+ */
+export const replanTime = (tl: Timeline, now: number, started: boolean) => (started ? now : Math.max(now, tl.start));
+
 /** Before the start: did this GPS reading show them setting off along the route, early enough to count? */
 export const setsOffEarly = (tl: Timeline, now: number, before: Track, after: Track) =>
   canStartEarly(tl, now) && (after.current > before.current || after.progressFt >= SET_OFF_FT);

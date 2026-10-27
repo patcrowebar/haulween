@@ -797,3 +797,58 @@ button {
 .settings-notes li + li {
   margin-top: 6px;
 }
+
+/* ---------- Ask Jack (Night Mode, only with a key) ---------- */
+
+.jack h3 {
+  margin: 0 0 10px;
+}
+
+.jack-ask {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.jack-ask input {
+  width: 100%;
+  min-width: 0;
+}
+
+.jack-ask .primary {
+  width: auto;
+  margin: 0;
+  padding: 0 18px;
+}
+
+.jack-answer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #262939;
+}
+
+.jack-reply {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.jack-change {
+  margin: 0 0 8px;
+  font-weight: 700;
+  color: var(--orange);
+}
+
+.jack-note {
+  margin: 8px 0 0;
+}
+
+.jack-choice {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.jack-choice .primary,
+.jack-choice .secondary {
+  margin-top: 0;
+}

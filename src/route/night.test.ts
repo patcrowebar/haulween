@@ -6,7 +6,7 @@ import { Geo, key } from './geo';
 import { planRoute } from './plan';
 import { replanFromHere } from './replan';
 import { nextStretchLink, parseClock } from './schedule';
-import { countdownText, hasStarted, nightStatus, setsOffEarly, timeline, turnAroundDue } from './status';
+import { countdownText, hasStarted, nightStatus, replanTime, setsOffEarly, timeline, turnAroundDue } from './status';
 import { GPS_ACCURACY_M, checkOff, onReading, pointAlong, startTrack, uncheck, type Reading, type Track } from './track';
 import type { Pt } from './types';
 
@@ -197,6 +197,20 @@ describe('replan from here', () => {
     expect(res.plan.estimate.houses).toBe(0);
     expect(checkRoute(res.plan.pocket, res.plan.segments, HOME)).toEqual([]);
     expect(res.plan.segments.every((s) => s.pattern === 'walk_through')).toBe(true);
+  });
+
+  it('before the night starts, replans from the planned start, not from now', () => {
+    const start = parseClock(opts.startTime);
+    const eveningBefore = start - 1440 + 120;
+    expect(replanTime(tl, eveningBefore, false)).toBe(start);
+    expect(replanTime(tl, start - 30, false)).toBe(start);
+    expect(replanTime(tl, start + 30, true)).toBe(start + 30);
+    expect(replanTime(tl, start - 15, true)).toBe(start - 15); // set off early: from now
+    const res = replanFromHere(SPRINGWOOD, HOME, { ...opts, now: replanTime(tl, eveningBefore, false) }, { row: segs[0], at: null }, []);
+    if (!res.ok) throw new Error(res.problems.join('; '));
+    expect(res.plan.schedule.rows[0].t24).toBe(opts.startTime);
+    expect(res.plan.estimate.minutes).toBeLessThanOrEqual(end - start - 10);
+    expect(checkRoute(res.plan.pocket, res.plan.segments, HOME)).toEqual([]);
   });
 
   it('from a GPS point mid-street, starts at the next corner ahead', () => {
