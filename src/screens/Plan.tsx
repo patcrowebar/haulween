@@ -8,7 +8,7 @@ import { WeatherClient, type Tonight } from '../data/weather';
 import type { OsmData, Pt } from '../route/types';
 import Results from './Results';
 import { freshProgress, loadNight, makeNightPlan, saveNight } from './nightStore';
-import { loadPlanned, plannedFor, savePlanned, updatePlanned } from './planStore';
+import { fresherForecast, loadPlanned, plannedFor, savePlanned, updatePlanned } from './planStore';
 import { Planner, isCancelled, plainMessage } from './planner';
 import {
   DEFAULT_FORM, choiceKey, estimatesFor, routeTitle, toForm, type PlanForm, type PlanOnce, type PlanOutcome,
@@ -77,6 +77,8 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
   const [startError, setStartError] = useState<string | null>(null);
   /** Said when the phone had no room to keep the route for next time. */
   const [keepNote, setKeepNote] = useState<string | null>(null);
+  /** Bumped by each plan or reopen, so a forecast that comes in late can't land on another one. */
+  const wxTurn = useRef(0);
 
   const set = <K extends keyof PlanForm>(k: K, v: PlanForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -108,11 +110,14 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
       return;
     }
     setStatus('working');
+    const turn = ++wxTurn.current;
     try {
       let next: Found;
       /** The forecast, when it's already in hand; otherwise it's on its way. */
       let forecast: Tonight | null = null;
       let coming: Promise<Tonight> | null = null;
+      /** A newer forecast for the kept one, when that's over 3 hours old. */
+      let fresher: Promise<Tonight | null> | null = null;
       // The same address as the route kept on this phone: reuse its streets, no lookups at all.
       const kept = asDemo ? null : plannedFor(f.address);
       if (asDemo) {
@@ -128,6 +133,10 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
           forecast = k.tonight;
           setTonight(k.tonight);
           setWeatherNote(null);
+          fresher = fresherForecast(k.tonight, Date.now(), () => askWeather(next.home, f)).then((t) => {
+            if (t && turn === wxTurn.current) setTonight(t);
+            return t;
+          });
         } else {
           coming = forecastFor(next.home, f);
         }
@@ -157,6 +166,7 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
         keep(next, f, forecast);
         // Kept first, so a forecast that comes in later goes with this route, not the last one.
         coming?.then((t) => updatePlanned({ tonight: t }), () => {});
+        fresher?.then((t) => { if (t && turn === wxTurn.current) updatePlanned({ tonight: t }); });
       }
       setStatus('done');
       requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ block: 'start' }));
@@ -171,7 +181,7 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
 
   /** Tonight's weather, shown when it comes in. */
   function forecastFor(home: Pt, f: PlanForm): Promise<Tonight> {
-    const wx = weather.tonight(home[0], home[1], f.date, hourOf(f.start), hourOf(f.end));
+    const wx = askWeather(home, f);
     wx.then((t) => {
       setTonight(t);
       setWeatherNote(null);
@@ -182,13 +192,28 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
     return wx;
   }
 
-  /** Show the route kept on this phone, worked out again here. No network at all. */
+  function askWeather(home: Pt, f: PlanForm): Promise<Tonight> {
+    return weather.tonight(home[0], home[1], f.date, hourOf(f.start), hourOf(f.end));
+  }
+
+  /**
+   * Show the route kept on this phone, worked out again here, with no street-data fetch. Its
+   * forecast shows at once; one over 3 hours old is asked for again alongside, and replaces it
+   * if that works.
+   */
   async function reopen() {
     const hit = loadPlanned();
     if (!hit) return;
     const { planned, data } = hit;
     setForm(planned.form);
     setTonight(planned.tonight);
+    const turn = ++wxTurn.current;
+    fresherForecast(planned.tonight, Date.now(), () => askWeather(planned.home, planned.form)).then((t) => {
+      if (!t || turn !== wxTurn.current) return;
+      setTonight(t);
+      setWeatherNote(null);
+      updatePlanned({ tonight: t });
+    });
     setStatus('working');
     setStep('Opening your saved route…');
     try {
@@ -214,6 +239,7 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
   function leaveDemo() {
     planner.cancel();
     generation.current++;
+    wxTurn.current++;
     setDemo(false);
     setFound(null);
     setOutcome(null);

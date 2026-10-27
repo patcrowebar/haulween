@@ -7,7 +7,7 @@
 // The street data is kept once, with the home point it's for, and Night Mode's replans use the
 // same copy. Phones give each site a few MB, so two copies could crowd out the plan.
 
-import type { Tonight } from '../data/weather';
+import { forecastIsFresh, type Tonight } from '../data/weather';
 import type { OsmData, Pt } from '../route/types';
 import { isNum, withDefaults } from '../stored';
 import { streetOnlyTitle, toForm, type PlanForm } from './planning';
@@ -122,4 +122,18 @@ const sameAddress = (a: string, b: string) => {
 export function plannedFor(address: string): { planned: Planned; data: OsmData } | null {
   const hit = loadPlanned();
   return hit && sameAddress(hit.planned.form.address, address) ? hit : null;
+}
+
+/**
+ * A fresher forecast for a kept plan, when its own is over 3 hours old (or missing). Null when
+ * it's fresh enough, or when asking fails (no signal, an error, too far ahead): keep showing the
+ * kept one. Never waited on before showing the route.
+ */
+export async function fresherForecast(kept: Tonight | null, now: number, get: () => Promise<Tonight>): Promise<Tonight | null> {
+  if (kept && forecastIsFresh(kept, now)) return null;
+  try {
+    return await get();
+  } catch {
+    return null;
+  }
 }

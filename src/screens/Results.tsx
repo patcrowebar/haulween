@@ -3,7 +3,7 @@
 import { Suspense, lazy, useState } from 'react';
 import type { Plan } from '../route/plan';
 import { nextStretchLink } from '../route/schedule';
-import { flagsFor, type Tonight } from '../data/weather';
+import { flagsFor, updatedText, type Tonight } from '../data/weather';
 import { paceChoice } from '../config';
 import { ampm, choiceKey, leftOut, patternText, type Estimate, type PlanForm, type PlanOutcome } from './planning';
 
@@ -205,7 +205,10 @@ function TonightCard({ tonight, note, demo }: { tonight: Tonight | null; note: s
         {f.cold && <li>Feels like {f.lowF}°F by the end. Layers under costumes.</li>}
         {f.rain ? <li>{f.maxRain}% chance of rain. Pack ponchos.</li> : <li>Rain unlikely ({f.maxRain}% at most).</li>}
       </ul>
-      <p className="muted small">{demo ? 'Demo weather, made up.' : 'Weather by Open-Meteo.'}</p>
+      <p className="muted small">
+        {demo ? 'Demo weather, made up.' : 'Weather by Open-Meteo.'}
+        {!demo && tonight.fetchedAt !== undefined && <><br />{updatedText(tonight.fetchedAt, Date.now())}</>}
+      </p>
     </div>
   );
 }
