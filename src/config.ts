@@ -1,7 +1,7 @@
 // App-wide constants. Defaults come from the reference skill (reference/SKILL.md).
 
 /** The Claude model Jack uses. Keep the model name here and nowhere else. */
-export const CLAUDE_MODEL = 'claude-sonnet-5-5';
+export const CLAUDE_MODEL = 'claude-haiku-5-5';
 
 /** Placeholder address for examples, tests and screenshots. Never use a real one. */
 export const PLACEHOLDER_ADDRESS = '1428 Elm St, Springwood, OH';
