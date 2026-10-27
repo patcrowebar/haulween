@@ -124,6 +124,7 @@ button {
 
 .form .field {
   margin: 0 0 16px;
+  min-width: 0;
 }
 
 .field > span {
@@ -140,9 +141,24 @@ button {
   min-width: 0;
 }
 
+/* iOS Safari gives date and time inputs a built-in minimum width, so they push past the card.
+   Dropping the native look lets them take the card's width; the picker still opens on tap. */
+.form input[type='date'],
+.form input[type='time'] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  max-width: 100%;
+  text-align: left;
+}
+
+.form input::-webkit-date-and-time-value {
+  text-align: left;
+}
+
 .row2 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -245,11 +261,24 @@ button {
 
 .doors {
   border: 1px solid #262939;
+  min-width: 0;
 }
 
+/* Floated, so the group name sits inside the card like the Forecast heading instead of on its
+   border. It's still the fieldset's legend, so screen readers announce it with the choices. */
 .doors legend {
+  float: left;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 0;
+  font-family: var(--font-display);
+  font-size: 1.17em;
   font-weight: 700;
-  padding: 0 4px;
+  line-height: 1.1;
+}
+
+.doors legend + * {
+  clear: both;
 }
 
 .doors p {
