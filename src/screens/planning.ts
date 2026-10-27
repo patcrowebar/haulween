@@ -9,6 +9,7 @@ import { planRoute, type PlanResult } from '../route/plan';
 import { replanFromHere, type Here, type ReplanOptions, type ReplanResult, type Visited } from '../route/replan';
 import { findPocket } from '../route/pocket';
 import { withDefaults } from '../stored';
+import { avoidEntries, matchRoad } from './roadNames';
 import type { OsmData, Pt } from '../route/types';
 
 export type PlanForm = {
@@ -57,36 +58,59 @@ export function toForm(saved: unknown): PlanForm {
   return { ...f, pace, doorSeconds };
 }
 
-const norm = (s: string) => shortName(s).toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
-/** "Maple Avenue" matches "Maple Ave"; "maple" matches too, when only one street starts that way. */
-const sameStreet = (typed: string, name: string) => {
-  const a = norm(typed), b = norm(name);
-  return a === b || (a.length >= 3 && b.split(' ')[0] === a);
-};
-
 export type AvoidResult = {
   /** Street names to leave out of the route. */
   exclude: string[];
   /** Busy roads: off-limits already. */
   alreadyOff: string[];
-  /** Typed names we couldn't find near home. */
+  /** Typed names we couldn't match to one road near home (no match, or more than one fits). */
   notFound: string[];
+  /** Each typed entry and what it matched, for the line under the field. */
+  entries: AvoidEntry[];
 };
 
-/** Match "roads to avoid" against the streets near home. */
-export function matchAvoid(text: string, data: OsmData, home: Pt): AvoidResult {
-  const typed = text.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
-  const pocket = findPocket(data, home);
-  const out: AvoidResult = { exclude: [], alreadyOff: [], notFound: [] };
-  for (const t of typed) {
-    const safe = pocket.pocket.filter((s) => sameStreet(t, s.name)).map((s) => s.name);
-    const busy = pocket.busyNames.filter((n) => sameStreet(t, n));
-    const outside = pocket.outside.filter((n) => sameStreet(t, n));
-    if (safe.length) out.exclude.push(...safe);
-    else if (busy.length) out.alreadyOff.push(...busy.map(shortName));
-    else if (!outside.length) out.notFound.push(t);
+/** One typed entry: the road it matched (as people say it), or what we might suggest. */
+export type AvoidEntry = { typed: string } & (
+  | { kind: 'match'; road: string; busy: boolean }
+  | { kind: 'unsure'; suggestions: string[] }
+  | { kind: 'none' }
+);
+
+/** The street names loaded for a plan, by where they are. Worked out once per plan. */
+export type RoadNames = { pocket: string[]; busy: string[]; outside: string[] };
+
+export function roadNamesNear(data: OsmData, home: Pt): RoadNames {
+  const p = findPocket(data, home);
+  return { pocket: [...new Set(p.pocket.map((s) => s.name))], busy: p.busyNames, outside: p.outside };
+}
+
+/** Match "roads to avoid" against the street names near home (see roadNames.ts). */
+export function readAvoid(text: string, names: RoadNames): AvoidResult {
+  const all = [...names.pocket, ...names.busy, ...names.outside];
+  const out: AvoidResult = { exclude: [], alreadyOff: [], notFound: [], entries: [] };
+  for (const typed of avoidEntries(text)) {
+    const m = matchRoad(typed, all);
+    if (m.kind !== 'match') {
+      out.notFound.push(typed);
+      out.entries.push({ typed, ...m });
+      continue;
+    }
+    const busy = names.busy.includes(m.name) && !names.pocket.includes(m.name);
+    if (busy) out.alreadyOff.push(shortName(m.name));
+    else if (names.pocket.includes(m.name) && !out.exclude.includes(m.name)) out.exclude.push(m.name);
+    out.entries.push({ typed, kind: 'match', road: shortName(m.name), busy });
   }
   return out;
+}
+
+/** "Avoiding: Oak St, Maple Ave": the roads typed entries matched, busy ones aside. Null when none. */
+export function avoidingText(avoid: AvoidResult): string | null {
+  const roads = [...new Set(avoid.entries.flatMap((e) => (e.kind === 'match' && !e.busy ? [e.road] : [])))];
+  return roads.length ? `Avoiding: ${roads.join(', ')}` : null;
+}
+
+export function matchAvoid(text: string, data: OsmData, home: Pt): AvoidResult {
+  return readAvoid(text, roadNamesNear(data, home));
 }
 
 /**

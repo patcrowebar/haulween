@@ -156,6 +156,20 @@ button {
   text-align: left;
 }
 
+/* Under "Roads to avoid": what each entry matched, and suggestions to tap. */
+.avoid-line {
+  margin: -8px 0 16px;
+}
+
+.avoid-line p {
+  margin: 0 0 4px;
+}
+
+.avoid-line .suggest {
+  padding: 0;
+  font-weight: 700;
+}
+
 .row2 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

@@ -31,7 +31,7 @@ describe('reading the form', () => {
 
 describe('roads to avoid', () => {
   it('matches the way people type street names', () => {
-    expect(matchAvoid('Maple Avenue, birch st, Main Street, Nowhere Ln', SPRINGWOOD, HOME)).toEqual({
+    expect(matchAvoid('Maple Avenue, birch st, Main Street, Nowhere Ln', SPRINGWOOD, HOME)).toMatchObject({
       exclude: ['Maple Ave', 'Birch St'],
       alreadyOff: ['Main St'],
       notFound: ['Nowhere Ln'],

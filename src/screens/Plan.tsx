@@ -11,8 +11,10 @@ import { freshProgress, loadNight, makeNightPlan, saveNight } from './nightStore
 import { fresherForecast, loadPlanned, plannedFor, savePlanned, updatePlanned } from './planStore';
 import { Planner, isCancelled, plainMessage } from './planner';
 import {
-  DEFAULT_FORM, choiceKey, estimatesFor, routeTitle, toForm, type PlanForm, type PlanOnce, type PlanOutcome,
+  DEFAULT_FORM, avoidingText, choiceKey, estimatesFor, readAvoid, roadNamesNear, routeTitle, toForm,
+  type AvoidResult, type PlanForm, type PlanOnce, type PlanOutcome,
 } from './planning';
+import { withSuggestion } from './roadNames';
 
 const FORM_KEY = 'haulween.form';
 const geocoder = new FallbackGeocoder();
@@ -57,6 +59,8 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
   const [step, setStep] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [found, setFound] = useState<Found | null>(null);
+  /** The address the shown streets were loaded for, so names are matched only against its streets. */
+  const [foundFor, setFoundFor] = useState('');
   const [outcome, setOutcome] = useState<PlanOutcome | null>(null);
   const [tonight, setTonight] = useState<Tonight | null>(null);
   const [weatherNote, setWeatherNote] = useState<string | null>(null);
@@ -80,6 +84,11 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
   /** Bumped by each plan or reopen, so a forecast that comes in late can't land on another one. */
   const wxTurn = useRef(0);
 
+  /** Street names near home, once streets are loaded; "roads to avoid" is matched against them as it's typed. */
+  const roadNames = useMemo(() => (found ? roadNamesNear(found.data, found.home) : null), [found]);
+  const sameHome = foundFor.trim().toLowerCase() === form.address.trim().toLowerCase();
+  const avoidNow = roadNames && sameHome ? readAvoid(form.avoid, roadNames) : null;
+
   const set = <K extends keyof PlanForm>(k: K, v: PlanForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   /** Plan at the chosen door time and pace and show it. Other choices are planned when tapped. */
@@ -92,6 +101,7 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
     if (gen !== generation.current) return null;
     plans.current.set(choiceKey(f), main);
     setFound(next);
+    setFoundFor(f.address);
     setOutcome({ ...main, ...estimatesFor(f, known) });
     if (!main.result.ok) setError(NO_ROUTE);
     return main;
@@ -377,6 +387,7 @@ export default function Plan({ onNight, onSettings }: { onNight: () => void; onS
           />
           <small className="muted">Busy roads are off-limits already.</small>
         </label>
+        {avoidNow && avoidNow.entries.length > 0 && <AvoidLine avoid={avoidNow} onPick={(typed, road) => set('avoid', withSuggestion(form.avoid, typed, road))} />}
 
         {error && <p className="error" role="alert">{error}</p>}
 
@@ -451,5 +462,30 @@ function DebugPanel({ attempts, onClear }: { attempts: Attempt[]; onClear: () =>
       )}
       <button type="button" className="link" onClick={onClear}>Clear</button>
     </section>
+  );
+}
+
+/** Under "Roads to avoid": what each entry matched, and a suggestion when we won't guess. */
+function AvoidLine({ avoid, onPick }: { avoid: AvoidResult; onPick: (typed: string, road: string) => void }) {
+  const avoiding = avoidingText(avoid);
+  const busy = avoid.entries.flatMap((e) => (e.kind === 'match' && e.busy ? [e.road] : []));
+  return (
+    <div className="avoid-line small" aria-live="polite">
+      {avoiding && <p>{avoiding}</p>}
+      {busy.length > 0 && <p className="muted">{[...new Set(busy)].join(', ')}: busy, so it's off the route already.</p>}
+      {avoid.entries.map((e) => e.kind === 'unsure' ? (
+        <p key={e.typed}>
+          No road called '{e.typed}' nearby. Did you mean{' '}
+          {e.suggestions.map((road, i) => (
+            <span key={road}>
+              {i > 0 && (i === e.suggestions.length - 1 ? ' or ' : ', ')}
+              <button type="button" className="link suggest" onClick={() => onPick(e.typed, road)}>{road}</button>
+            </span>
+          ))}?
+        </p>
+      ) : e.kind === 'none' ? (
+        <p key={e.typed}>No road called '{e.typed}' nearby.</p>
+      ) : null)}
+    </div>
   );
 }
