@@ -189,7 +189,7 @@ function TonightCard({ tonight, note, demo }: { tonight: Tonight | null; note: s
   const temps = tonight.hours.map((h) => h.tempF);
   return (
     <div className="panel tonight">
-      <h3>Tonight</h3>
+      <h3>Forecast</h3>
       <div className="tonight-grid">
         <div><span className="label">Sunset</span><span className="num">{ampm(tonight.sunset)}</span></div>
         <div><span className="label">Dark by</span><span className="num">{ampm(tonight.dark)}</span></div>
